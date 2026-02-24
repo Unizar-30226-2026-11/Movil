@@ -26,6 +26,10 @@ export default function MainScreen() {
   const [buscando, setBuscando] = useState(false);
   const [socialVisible, setSocialVisible] = useState(false);
 
+  // --- ESTADOS PARA LA CARTA DE LA COMUNIDAD ---
+  const [votos, setVotos] = useState(458);
+  const [miVoto, setMiVoto] = useState(0); // 1 (positivo), -1 (negativo), 0 (sin voto)
+
   const coleccionSurrealista = [
     { id: '1', bloqueada: true, imagen: 'https://images.unsplash.com/photo-1494438639946-1ebd1d20bf85?auto=format&fit=crop&w=400&q=80' },
     { id: '2', bloqueada: false, nombre: 'Ojo', imagen: 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?auto=format&fit=crop&w=400&q=80' },
@@ -65,6 +69,19 @@ export default function MainScreen() {
     }, 3000);
   };
 
+  // Función para manejar los votos de la carta de la comunidad
+  const manejarVoto = (tipo: number) => {
+    if (miVoto === tipo) {
+      // Si ya había votado lo mismo, se cancela el voto
+      setMiVoto(0);
+      setVotos(votos - tipo);
+    } else {
+      // Si vota algo nuevo, sumamos la diferencia
+      setVotos(votos - miVoto + tipo);
+      setMiVoto(tipo);
+    }
+  };
+
   useEffect(() => {
     if (loaded || error) {
       SplashScreen.hideAsync();
@@ -84,7 +101,7 @@ export default function MainScreen() {
       resizeMode="cover"
     >
       <SafeAreaView style={styles.safeArea}>
-        {/* CABECERA CORREGIDA */}
+        {/* CABECERA */}
         <View style={styles.header}>
           <View style={styles.headerTitleContainer}>
             <Svg height="100%" width="100%" viewBox="0 0 300 50">
@@ -94,16 +111,15 @@ export default function MainScreen() {
             </Svg>
           </View>
           <View style={styles.headerIcons}>
-            <TouchableOpacity style={{ padding: 5 }} onPress={() => router.push('/store')}>
+            <TouchableOpacity style={{ padding: 5 }}>
               <Ionicons name="cart-outline" size={26} color="#FCEEB5" />
             </TouchableOpacity>
             <TouchableOpacity style={{ padding: 5 }} onPress={() => setSocialVisible(true)}>
               <Ionicons name="people-outline" size={26} color="#FCEEB5" />
-            </TouchableOpacity> 
+            </TouchableOpacity>
             <TouchableOpacity style={{ padding: 5 }}>
               <Ionicons name="person-circle-outline" size={26} color="#FCEEB5" />
             </TouchableOpacity>
-            {/* RUTA DE AJUSTES RESTAURADA */}
             <TouchableOpacity style={{ padding: 5 }} onPress={() => router.push('/setting')}>
               <Ionicons name="settings-outline" size={26} color="#FCEEB5" />
             </TouchableOpacity>
@@ -112,6 +128,7 @@ export default function MainScreen() {
 
         {/* CONTENIDO PRINCIPAL */}
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          
           <TouchableOpacity style={styles.accordionButton} activeOpacity={0.8} onPress={() => setCartasDesplegadas(!cartasDesplegadas)}>
             <Text style={styles.accordionText}>Mis Cartas (12/256)</Text>
             <Ionicons name={cartasDesplegadas ? "chevron-up" : "chevron-down"} size={24} color="#2c3e50" />
@@ -136,6 +153,56 @@ export default function MainScreen() {
               </View>
             </View>
           )}
+
+          {/* ========================================= */}
+          {/* NUEVO BLOQUE: CARTA DE LA COMUNIDAD */}
+          {/* ========================================= */}
+          <View style={styles.communityPanel}>
+            <Text style={styles.communityTitle}>Carta de la Comunidad:</Text>
+            
+            <View style={styles.communityImageContainer}>
+              <Image 
+                source={{ uri: 'https://images.unsplash.com/photo-1518640467707-6811f4a6ab73?auto=format&fit=crop&w=600&q=80' }} // Imagen surrealista de ejemplo
+                style={styles.communityImage} 
+                resizeMode="cover" 
+              />
+            </View>
+
+            <Text style={styles.communitySubtitle}>Donde nacen las sombras</Text>
+
+            <View style={styles.communityFooter}>
+              {/* Controles de Votos */}
+              <View style={styles.voteControls}>
+                <TouchableOpacity 
+                  style={[styles.voteButton, miVoto === 1 && styles.voteButtonActiveUp]} 
+                  onPress={() => manejarVoto(1)}
+                >
+                  <Ionicons name="arrow-up" size={18} color="white" />
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  style={[styles.voteButton, miVoto === -1 && styles.voteButtonActiveDown]} 
+                  onPress={() => manejarVoto(-1)}
+                >
+                  <Ionicons name="arrow-down" size={18} color="white" />
+                </TouchableOpacity>
+
+                <View style={styles.voteBadge}>
+                  <Text style={styles.voteBadgeText}>{votos}</Text>
+                </View>
+              </View>
+
+              {/* Estrellas */}
+              <View style={styles.starsContainer}>
+                <Ionicons name="star" size={20} color="#2c3e50" />
+                <Ionicons name="star" size={20} color="#2c3e50" />
+                <Ionicons name="star" size={20} color="#2c3e50" />
+                <Ionicons name="star-outline" size={20} color="#2c3e50" />
+                <Ionicons name="star-outline" size={20} color="#2c3e50" />
+              </View>
+            </View>
+          </View>
+          {/* ========================================= */}
 
           <View style={styles.panel}>
             <View style={styles.panelHeader}>
@@ -189,7 +256,8 @@ export default function MainScreen() {
           </View>
         </ScrollView>
 
-        {/* MODAL DE SELECCIÓN (Mapa/Mazo) */}
+        {/* MODALES Y PANELES LATERALES */}
+        {/* ... (Modal de selección de mapa/mazo) ... */}
         <Modal animationType="fade" transparent={true} visible={modalVisible} onRequestClose={() => setModalVisible(false)}>
           <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setModalVisible(false)}>
             <View style={styles.modalContent}>
@@ -208,13 +276,10 @@ export default function MainScreen() {
           </TouchableOpacity>
         </Modal>
 
-        {/* ========================================= */}
-        {/* PANEL SOCIAL (CAPA ABSOLUTA, NO MODAL) */}
-        {/* ========================================= */}
+        {/* Panel Social */}
         {socialVisible && (
           <View style={styles.socialOverlayAbsolute}>
             <TouchableOpacity style={styles.socialModalOverlay} activeOpacity={1} onPress={() => setSocialVisible(false)} />
-            
             <View style={styles.socialPanel}>
               <View style={styles.socialHeader}>
                 <TouchableOpacity onPress={() => setSocialVisible(false)}>
@@ -267,7 +332,6 @@ export default function MainScreen() {
             </View>
           </View>
         )}
-
       </SafeAreaView>
     </ImageBackground>
   );
@@ -277,15 +341,14 @@ const styles = StyleSheet.create({
   background: { flex: 1, width: '100%', height: '100%' },
   safeArea: { flex: 1, backgroundColor: 'rgba(0,0,0,0.1)' },
   
-  // CABECERA: Z-Index y Elevation altos
   header: { 
     zIndex: 20, 
-    elevation: 20, // <--- NECESARIO EN ANDROID
+    elevation: 20, 
     backgroundColor: 'rgba(10, 25, 40, 0.95)', 
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 15, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#FCEEB5' 
   },
   headerTitleContainer: { flex: 1, height: 50, marginRight: 10 },
-  headerIcons: { flexDirection: 'row', gap: 5 }, // Reduje un poco el gap porque los botones ahora tienen padding
+  headerIcons: { flexDirection: 'row', gap: 5 }, 
   scrollContent: { padding: 20, gap: 20, paddingBottom: 50 },
   accordionButton: { backgroundColor: '#FCEEB5', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, borderRadius: 12, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 3, elevation: 4 },
   accordionText: { fontSize: 16, fontWeight: 'bold', color: '#2c3e50' },
@@ -298,6 +361,45 @@ const styles = StyleSheet.create({
   lockedOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
   unlockedOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.15)', justifyContent: 'flex-end', alignItems: 'center', paddingBottom: 8 },
   cardText: { color: '#FFFFFF', fontSize: 12, fontWeight: 'bold', textAlign: 'center', textShadowColor: 'rgba(0,0,0,0.9)', textShadowOffset: { width: 1, height: 1 }, textShadowRadius: 4 },
+
+  // --- ESTILOS DE LA CARTA DE LA COMUNIDAD ---
+  communityPanel: { 
+    backgroundColor: 'rgba(238, 242, 245, 0.95)', 
+    borderRadius: 15, 
+    padding: 15,
+    shadowColor: "red", // Le da ese toque rojizo de tu diseño
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.15,
+    shadowRadius: 15,
+    elevation: 8,
+  },
+  communityTitle: { fontSize: 18, color: '#2c3e50', marginBottom: 15 },
+  communityImageContainer: {
+    width: '100%',
+    aspectRatio: 0.75, // Formato carta alta
+    borderRadius: 15,
+    overflow: 'hidden',
+    marginBottom: 15,
+  },
+  communityImage: { width: '100%', height: '100%' },
+  communitySubtitle: { fontSize: 16, color: '#2c3e50', textAlign: 'center', marginBottom: 15 },
+  communityFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  voteControls: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  voteButton: { 
+    backgroundColor: '#2c3e50', 
+    width: 34, 
+    height: 34, 
+    borderRadius: 17, 
+    alignItems: 'center', 
+    justifyContent: 'center' 
+  },
+  voteButtonActiveUp: { backgroundColor: '#2ecc71' }, // Verde si votas positivo
+  voteButtonActiveDown: { backgroundColor: '#e74c3c' }, // Rojo si votas negativo
+  voteBadge: { backgroundColor: '#2c3e50', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6 },
+  voteBadgeText: { color: 'white', fontWeight: 'bold', fontSize: 12 },
+  starsContainer: { flexDirection: 'row', gap: 2 },
+  // -------------------------------------------
+
   panel: { backgroundColor: 'rgba(238, 242, 245, 0.9)', borderRadius: 15, padding: 15 },
   panelHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
   panelTitle: { fontSize: 18, color: '#2c3e50' },
@@ -328,22 +430,9 @@ const styles = StyleSheet.create({
   modalCloseButton: { marginTop: 15, backgroundColor: '#FF6B6B', padding: 12, borderRadius: 8, alignItems: 'center' },
   modalCloseText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
 
-  socialOverlayAbsolute: {
-    position: 'absolute', 
-    top: 71, 
-    bottom: 0,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    zIndex: 10, 
-  },
+  socialOverlayAbsolute: { position: 'absolute', top: 71, bottom: 0, left: 0, right: 0, flexDirection: 'row', zIndex: 10 },
   socialModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' },
-  socialPanel: {
-    width: '85%',
-    backgroundColor: 'rgba(10, 25, 40, 0.95)', 
-    borderLeftWidth: 1,
-    borderLeftColor: '#FCEEB5',
-  },
+  socialPanel: { width: '85%', backgroundColor: 'rgba(10, 25, 40, 0.95)', borderLeftWidth: 1, borderLeftColor: '#FCEEB5' },
   socialHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, borderBottomWidth: 1, borderBottomColor: 'rgba(252, 238, 181, 0.3)' },
   socialTitle: { fontSize: 20, color: '#FCEEB5', fontWeight: 'bold', letterSpacing: 1 },
   socialScrollContent: { padding: 20, paddingBottom: 40 },
