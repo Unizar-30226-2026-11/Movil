@@ -94,12 +94,12 @@ export default function MainScreen() {
             </Svg>
           </View>
           <View style={styles.headerIcons}>
-            <TouchableOpacity style={{ padding: 5 }}>
+            <TouchableOpacity style={{ padding: 5 }} onPress={() => router.push('/store')}>
               <Ionicons name="cart-outline" size={26} color="#FCEEB5" />
             </TouchableOpacity>
             <TouchableOpacity style={{ padding: 5 }} onPress={() => setSocialVisible(true)}>
               <Ionicons name="people-outline" size={26} color="#FCEEB5" />
-            </TouchableOpacity>
+            </TouchableOpacity> 
             <TouchableOpacity style={{ padding: 5 }}>
               <Ionicons name="person-circle-outline" size={26} color="#FCEEB5" />
             </TouchableOpacity>
