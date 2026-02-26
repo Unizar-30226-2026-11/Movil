@@ -1,7 +1,7 @@
 import { 
   StyleSheet, Text, View, ImageBackground, Image, 
   TouchableOpacity, ScrollView, SafeAreaView, Modal, ActivityIndicator, 
-  Platform, StatusBar 
+  Platform, StatusBar, TextInput, Alert 
 } from 'react-native';
 import { useFonts } from 'expo-font';
 import { useEffect, useState } from 'react';
@@ -10,7 +10,6 @@ import Svg, { Text as SvgText } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons'; 
 import { useRouter } from 'expo-router';
 import { useLocalSearchParams } from 'expo-router';
-
 
 SplashScreen.preventAutoHideAsync();
 
@@ -51,10 +50,30 @@ export default function MainScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [tipoModal, setTipoModal] = useState(''); 
   const [buscando, setBuscando] = useState(false);
+  
+  // --- ESTADOS SOCIALES ---
   const [socialVisible, setSocialVisible] = useState(false);
-
   const [votos, setVotos] = useState(458);
-  const [miVoto, setMiVoto] = useState(0); // 1 (positivo), -1 (negativo), 0 (sin voto)
+  const [miVoto, setMiVoto] = useState(0); 
+  
+  // Lista de amigos 
+  const [amigos, setAmigos] = useState([
+    { id: '1', nombre: 'hachelpez', estado: 'online', actividad: 'en el menu principal', avatar: 'https://i.pravatar.cc/100?img=11' },
+    { id: '2', nombre: 'diegolool', estado: 'online', actividad: 'en partida', avatar: 'https://i.pravatar.cc/100?img=12' },
+    { id: '3', nombre: 'marqui1', estado: 'online', actividad: 'en el menu principal', avatar: 'https://i.pravatar.cc/100?img=13' },
+    { id: '4', nombre: 'toxisita', estado: 'offline', avatar: 'https://i.pravatar.cc/100?img=14' },
+    { id: '5', nombre: 'hector22', estado: 'offline', avatar: 'https://i.pravatar.cc/100?img=15' },
+  ]);
+
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const [modalMensajeVisible, setModalMensajeVisible] = useState(false);
+  const [amigoMensaje, setAmigoMensaje] = useState<any>(null);
+  const [textoMensaje, setTextoMensaje] = useState('');
+
+  const [modalAñadirVisible, setModalAñadirVisible] = useState(false);
+  const [nuevoAmigoNombre, setNuevoAmigoNombre] = useState('');
 
   const coleccionSurrealista = [
     { id: '1', bloqueada: true, imagen: 'https://images.unsplash.com/photo-1494438639946-1ebd1d20bf85?auto=format&fit=crop&w=400&q=80' },
@@ -63,14 +82,6 @@ export default function MainScreen() {
     { id: '4', bloqueada: true, imagen: 'https://images.unsplash.com/photo-1534447677768-be436bb09401?auto=format&fit=crop&w=400&q=80' },
     { id: '5', bloqueada: false, nombre: 'Desierto', imagen: 'https://images.unsplash.com/photo-1506159904225-f82b7b69cd5b?auto=format&fit=crop&w=400&q=80' },
     { id: '6', bloqueada: true, imagen: 'https://images.unsplash.com/photo-1550684848-fac1c5b4e853?auto=format&fit=crop&w=400&q=80' },
-  ];
-
-  const amigosMock = [
-    { id: '1', nombre: 'hachelpez', estado: 'online', actividad: 'en el menu principal', avatar: 'https://i.pravatar.cc/100?img=11' },
-    { id: '2', nombre: 'diegolool', estado: 'online', actividad: 'en partida', avatar: 'https://i.pravatar.cc/100?img=12' },
-    { id: '3', nombre: 'marqui1', estado: 'online', actividad: 'en el menu principal', avatar: 'https://i.pravatar.cc/100?img=13' },
-    { id: '4', nombre: 'toxisita', estado: 'offline', avatar: 'https://i.pravatar.cc/100?img=14' },
-    { id: '5', nombre: 'hector22', estado: 'offline', avatar: 'https://i.pravatar.cc/100?img=15' },
   ];
 
   const opcionesMapa = ['El Bosque de los Susurros', 'Ciudad Espejismo', 'Ruinas del Tiempo', 'Aleatorio'];
@@ -105,6 +116,38 @@ export default function MainScreen() {
     }
   };
 
+  const eliminarAmigo = (id: string, nombre: string) => {
+    Alert.alert("Eliminar Amigo", `¿Estás seguro de que quieres eliminar a ${nombre}?`, [
+      { text: "Cancelar", style: "cancel" },
+      { text: "Eliminar", style: "destructive", onPress: () => {
+          setAmigos(amigos.filter(a => a.id !== id));
+      }}
+    ]);
+  };
+
+  const enviarMensaje = () => {
+    if (textoMensaje.trim() === '') return;
+    Alert.alert("Mensaje enviado", `A ${amigoMensaje.nombre}: "${textoMensaje}"`);
+    setModalMensajeVisible(false);
+    setTextoMensaje('');
+  };
+
+  // --- FUNCIÓN AÑADIR AMIGO CORREGIDA PARA SIMULAR PETICIÓN AL BACKEND ---
+  const añadirAmigo = () => {
+    if (nuevoAmigoNombre.trim() === '') return;
+    
+    // Simula que la petición se ha enviado con éxito
+    Alert.alert("Solicitud enviada", `Se ha enviado una petición de amistad a ${nuevoAmigoNombre}.`);
+    
+    // Limpiamos y cerramos
+    setModalAñadirVisible(false);
+    setNuevoAmigoNombre('');
+  };
+
+  const invitarAmigo = (nombre: string) => {
+    Alert.alert("Invitación enviada", `Has invitado a ${nombre} a tu sala.`);
+  };
+
   useEffect(() => {
     if (loaded || error) {
       SplashScreen.hideAsync();
@@ -114,8 +157,9 @@ export default function MainScreen() {
   if (!loaded && !error) return null;
 
   const opcionesActuales = tipoModal === 'mapa' ? opcionesMapa : opcionesMazo;
-  const amigosOnline = amigosMock.filter(a => a.estado === 'online');
-  const amigosOffline = amigosMock.filter(a => a.estado === 'offline');
+  const amigosFiltrados = amigos.filter(a => a.nombre.toLowerCase().includes(searchQuery.toLowerCase()));
+  const amigosOnline = amigosFiltrados.filter(a => a.estado === 'online');
+  const amigosOffline = amigosFiltrados.filter(a => a.estado === 'offline');
 
   return (
     <ImageBackground
@@ -143,7 +187,7 @@ export default function MainScreen() {
             <TouchableOpacity style={{ padding: 5 }} onPress={() => router.push('/profile')}>
               <Ionicons name="person-circle-outline" size={26} color="#FCEEB5" />
             </TouchableOpacity>
-            <TouchableOpacity style={{ padding: 5 }} onPress={() => router.push('/setting')}>
+            <TouchableOpacity style={{ padding: 5 }} onPress={() => router.push('/settings')}>
               <Ionicons name="settings-outline" size={26} color="#FCEEB5" />
             </TouchableOpacity>
           </View>
@@ -151,11 +195,7 @@ export default function MainScreen() {
 
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           <View style={[styles.modeBanner, { borderColor: currentMode.color }]}>
-            <Ionicons
-              name={currentMode.icon}
-              size={16}
-              color={currentMode.color}
-            />
+            <Ionicons name={currentMode.icon} size={16} color={currentMode.color} />
             <Text style={[styles.modeBannerText, { color: currentMode.color }]}>
               {currentMode.label}
             </Text>
@@ -191,7 +231,7 @@ export default function MainScreen() {
             
             <View style={styles.communityImageContainer}>
               <Image 
-                source={{ uri: 'https://images.unsplash.com/photo-1518640467707-6811f4a6ab73?auto=format&fit=crop&w=600&q=80' }} // Imagen surrealista de ejemplo
+                source={{ uri: 'https://images.unsplash.com/photo-1518640467707-6811f4a6ab73?auto=format&fit=crop&w=600&q=80' }} 
                 style={styles.communityImage} 
                 resizeMode="cover" 
               />
@@ -201,17 +241,11 @@ export default function MainScreen() {
 
             <View style={styles.communityFooter}>
               <View style={styles.voteControls}>
-                <TouchableOpacity 
-                  style={[styles.voteButton, miVoto === 1 && styles.voteButtonActiveUp]} 
-                  onPress={() => manejarVoto(1)}
-                >
+                <TouchableOpacity style={[styles.voteButton, miVoto === 1 && styles.voteButtonActiveUp]} onPress={() => manejarVoto(1)}>
                   <Ionicons name="arrow-up" size={18} color="white" />
                 </TouchableOpacity>
 
-                <TouchableOpacity 
-                  style={[styles.voteButton, miVoto === -1 && styles.voteButtonActiveDown]} 
-                  onPress={() => manejarVoto(-1)}
-                >
+                <TouchableOpacity style={[styles.voteButton, miVoto === -1 && styles.voteButtonActiveDown]} onPress={() => manejarVoto(-1)}>
                   <Ionicons name="arrow-down" size={18} color="white" />
                 </TouchableOpacity>
 
@@ -304,18 +338,36 @@ export default function MainScreen() {
           <View style={styles.socialOverlayAbsolute}>
             <TouchableOpacity style={styles.socialModalOverlay} activeOpacity={1} onPress={() => setSocialVisible(false)} />
             <View style={styles.socialPanel}>
+              
               <View style={styles.socialHeader}>
                 <TouchableOpacity onPress={() => setSocialVisible(false)}>
                   <Ionicons name="arrow-back" size={24} color="#FCEEB5" />
                 </TouchableOpacity>
-                <Text style={styles.socialTitle}>SOCIAL</Text>
-                <TouchableOpacity>
-                  <Ionicons name="search" size={24} color="#FCEEB5" />
+                
+                {isSearching ? (
+                  <TextInput
+                    style={styles.searchInput}
+                    placeholder="Buscar amigo..."
+                    placeholderTextColor="#8caea6"
+                    value={searchQuery}
+                    onChangeText={setSearchQuery}
+                    autoFocus
+                  />
+                ) : (
+                  <Text style={styles.socialTitle}>SOCIAL</Text>
+                )}
+
+                <TouchableOpacity onPress={() => {
+                  setIsSearching(!isSearching);
+                  if (isSearching) setSearchQuery(''); 
+                }}>
+                  <Ionicons name={isSearching ? "close" : "search"} size={24} color="#FCEEB5" />
                 </TouchableOpacity>
               </View>
 
               <ScrollView contentContainerStyle={styles.socialScrollContent}>
-                <Text style={styles.socialSectionTitle}>CONECTADOS</Text>
+                
+                {amigosOnline.length > 0 && <Text style={styles.socialSectionTitle}>CONECTADOS ({amigosOnline.length})</Text>}
                 {amigosOnline.map((amigo) => (
                   <View key={amigo.id} style={styles.friendItem}>
                     <View style={styles.friendAvatarContainer}>
@@ -326,13 +378,19 @@ export default function MainScreen() {
                       <Text style={styles.friendName}>{amigo.nombre}</Text>
                       <Text style={styles.friendActivity}>{amigo.actividad}</Text>
                     </View>
-                    <TouchableOpacity style={styles.inviteFriendButton}>
-                      <Text style={styles.inviteFriendButtonText}>Invitar a la sala</Text>
-                    </TouchableOpacity>
+                    
+                    <View style={styles.friendActions}>
+                      <TouchableOpacity style={styles.inviteFriendButton} onPress={() => invitarAmigo(amigo.nombre)}>
+                        <Text style={styles.inviteFriendButtonText}>Invitar</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.deleteFriendButton} onPress={() => eliminarAmigo(amigo.id, amigo.nombre)}>
+                        <Ionicons name="trash-outline" size={18} color="#e74c3c" />
+                      </TouchableOpacity>
+                    </View>
                   </View>
                 ))}
 
-                <Text style={styles.socialSectionTitle}>DESCONECTADOS</Text>
+                {amigosOffline.length > 0 && <Text style={styles.socialSectionTitle}>DESCONECTADOS ({amigosOffline.length})</Text>}
                 {amigosOffline.map((amigo) => (
                   <View key={amigo.id} style={styles.friendItem}>
                     <View style={styles.friendAvatarContainer}>
@@ -342,19 +400,88 @@ export default function MainScreen() {
                     <View style={styles.friendInfo}>
                       <Text style={styles.friendName}>{amigo.nombre}</Text>
                     </View>
-                    <TouchableOpacity style={styles.messageFriendButton}>
-                      <Text style={styles.messageFriendButtonText}>escribir mensaje</Text>
-                    </TouchableOpacity>
+                    
+                    <View style={styles.friendActions}>
+                      <TouchableOpacity style={styles.messageFriendButton} onPress={() => {
+                        setAmigoMensaje(amigo);
+                        setModalMensajeVisible(true);
+                      }}>
+                        <Text style={styles.messageFriendButtonText}>Mensaje</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.deleteFriendButton} onPress={() => eliminarAmigo(amigo.id, amigo.nombre)}>
+                        <Ionicons name="trash-outline" size={18} color="#e74c3c" />
+                      </TouchableOpacity>
+                    </View>
                   </View>
                 ))}
+
+                {amigosFiltrados.length === 0 && (
+                  <Text style={styles.noResultsText}>No se encontraron amigos.</Text>
+                )}
+
               </ScrollView>
 
-              <TouchableOpacity style={styles.addFriendButton}>
+              <TouchableOpacity style={styles.addFriendButton} onPress={() => setModalAñadirVisible(true)}>
                 <Text style={styles.addFriendButtonText}>Añadir amigo</Text>
               </TouchableOpacity>
             </View>
           </View>
         )}
+
+        {/* MODAL: AÑADIR AMIGO MODIFICADO */}
+        <Modal visible={modalAñadirVisible} transparent animationType="fade">
+          <View style={styles.formModalOverlay}>
+            <View style={styles.formBox}>
+              <Text style={styles.formModalTitle}>Enviar solicitud de amistad</Text>
+              <TextInput 
+                style={styles.formInput}
+                placeholder="Nombre de usuario"
+                placeholderTextColor="#6b6b6b"
+                value={nuevoAmigoNombre}
+                onChangeText={setNuevoAmigoNombre}
+                autoFocus
+              />
+              <View style={styles.formModalButtons}>
+                <TouchableOpacity style={styles.formCancelButton} onPress={() => setModalAñadirVisible(false)}>
+                  <Text style={styles.formButtonText}>Cancelar</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.formSaveButton} onPress={añadirAmigo}>
+                  <Text style={styles.formButtonText}>Enviar</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* MODAL: ENVIAR MENSAJE */}
+        <Modal visible={modalMensajeVisible} transparent animationType="fade">
+          <View style={styles.formModalOverlay}>
+            <View style={styles.formBox}>
+              <Text style={styles.formModalTitle}>Mensaje a {amigoMensaje?.nombre}</Text>
+              <TextInput 
+                style={[styles.formInput, { height: 80, textAlignVertical: 'top' }]}
+                placeholder="Escribe tu mensaje..."
+                placeholderTextColor="#6b6b6b"
+                value={textoMensaje}
+                onChangeText={setTextoMensaje}
+                multiline
+                autoFocus
+              />
+              <View style={styles.formModalButtons}>
+                <TouchableOpacity style={styles.formCancelButton} onPress={() => {
+                  setModalMensajeVisible(false);
+                  setTextoMensaje('');
+                }}>
+                  <Text style={styles.formButtonText}>Cancelar</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.formSaveButton} onPress={enviarMensaje}>
+                  <Text style={styles.formButtonText}>Enviar</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
       </SafeAreaView>
     </ImageBackground>
   );
@@ -396,25 +523,12 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   communityTitle: { fontSize: 18, color: '#2c3e50', marginBottom: 15 },
-  communityImageContainer: {
-    width: '100%',
-    aspectRatio: 0.75,
-    borderRadius: 15,
-    overflow: 'hidden',
-    marginBottom: 15,
-  },
+  communityImageContainer: { width: '100%', aspectRatio: 0.75, borderRadius: 15, overflow: 'hidden', marginBottom: 15 },
   communityImage: { width: '100%', height: '100%' },
   communitySubtitle: { fontSize: 16, color: '#2c3e50', textAlign: 'center', marginBottom: 15 },
   communityFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   voteControls: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  voteButton: { 
-    backgroundColor: '#2c3e50', 
-    width: 34, 
-    height: 34, 
-    borderRadius: 17, 
-    alignItems: 'center', 
-    justifyContent: 'center' 
-  },
+  voteButton: { backgroundColor: '#2c3e50', width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
   voteButtonActiveUp: { backgroundColor: '#2ecc71' },
   voteButtonActiveDown: { backgroundColor: '#e74c3c' },
   voteBadge: { backgroundColor: '#2c3e50', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6 },
@@ -456,8 +570,10 @@ const styles = StyleSheet.create({
   socialPanel: { width: '85%', backgroundColor: 'rgba(10, 25, 40, 0.95)', borderLeftWidth: 1, borderLeftColor: '#FCEEB5' },
   socialHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, borderBottomWidth: 1, borderBottomColor: 'rgba(252, 238, 181, 0.3)' },
   socialTitle: { fontSize: 20, color: '#FCEEB5', fontWeight: 'bold', letterSpacing: 1 },
+  searchInput: { flex: 1, color: '#FCEEB5', fontSize: 16, borderBottomWidth: 1, borderBottomColor: '#8caea6', marginHorizontal: 10, paddingVertical: 4 },
   socialScrollContent: { padding: 20, paddingBottom: 40 },
   socialSectionTitle: { color: '#8caea6', fontSize: 14, fontWeight: 'bold', marginBottom: 15, marginTop: 10 },
+  noResultsText: { color: '#8caea6', fontStyle: 'italic', textAlign: 'center', marginTop: 20 },
   friendItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.05)', padding: 10, borderRadius: 12, marginBottom: 10 },
   friendAvatarContainer: { position: 'relative', marginRight: 15 },
   friendAvatar: { width: 50, height: 50, borderRadius: 25 },
@@ -465,28 +581,23 @@ const styles = StyleSheet.create({
   friendInfo: { flex: 1 },
   friendName: { color: '#FCEEB5', fontSize: 16, fontWeight: 'bold' },
   friendActivity: { color: '#8caea6', fontSize: 12 },
+  friendActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   inviteFriendButton: { backgroundColor: '#A8C8C0', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 20 },
   inviteFriendButtonText: { color: '#2c3e50', fontSize: 12, fontWeight: 'bold' },
   messageFriendButton: { backgroundColor: 'rgba(255,255,255,0.1)', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 20, borderWidth: 1, borderColor: '#8caea6' },
   messageFriendButtonText: { color: '#FCEEB5', fontSize: 12 },
+  deleteFriendButton: { padding: 5 },
   addFriendButton: { backgroundColor: '#A8C8C0', margin: 20, paddingVertical: 15, borderRadius: 30, alignItems: 'center', shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 3, elevation: 5 },
   addFriendButtonText: { fontSize: 18, fontWeight: 'bold', color: '#2c3e50' },
-  modeBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: 'rgba(10, 25, 40, 0.85)',
-    borderWidth: 1,
-    paddingVertical: 8,
-    borderRadius: 20,
-    alignSelf: 'center',
-    paddingHorizontal: 20,
-  },
+  modeBanner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: 'rgba(10, 25, 40, 0.85)', borderWidth: 1, paddingVertical: 8, borderRadius: 20, alignSelf: 'center', paddingHorizontal: 20 },
+  modeBannerText: { fontWeight: 'bold', letterSpacing: 1, fontSize: 13 },
 
-  modeBannerText: {
-    fontWeight: 'bold',
-    letterSpacing: 1,
-    fontSize: 13,
-  },
+  formModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
+  formBox: { width: '85%', backgroundColor: '#EEF2F5', padding: 25, borderRadius: 15, shadowColor: "#000", shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.3, shadowRadius: 5, elevation: 10 },
+  formModalTitle: { fontSize: 18, fontWeight: 'bold', color: '#2c3e50', marginBottom: 20, textAlign: 'center' },
+  formInput: { width: '100%', backgroundColor: '#FCEEB5', paddingVertical: 12, paddingHorizontal: 15, borderRadius: 10, fontSize: 16, borderWidth: 1, borderColor: '#d4c494', marginBottom: 20 },
+  formModalButtons: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 },
+  formCancelButton: { backgroundColor: '#FF6B6B', paddingVertical: 12, borderRadius: 10, width: '48%', alignItems: 'center' },
+  formSaveButton: { backgroundColor: '#A8C8C0', paddingVertical: 12, borderRadius: 10, width: '48%', alignItems: 'center' },
+  formButtonText: { color: 'white', fontWeight: 'bold', fontSize: 16, textShadowColor: 'rgba(0,0,0,0.2)', textShadowOffset: {width: 0, height: 1}, textShadowRadius: 2 },
 });
