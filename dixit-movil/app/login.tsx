@@ -14,7 +14,7 @@ export default function LoginScreen() {
   const router = useRouter();
 
   const [loaded, error] = useFonts({
-    'FuenteTitulo': require('../assets/fonts/fuente-dilana.ttf'), // Misma ruta
+    'FuenteTitulo': require('../assets/fonts/fuente-dilana.ttf'),
   });
 
   useEffect(() => {
@@ -27,7 +27,7 @@ export default function LoginScreen() {
 
   return (
     <ImageBackground
-      source={require('../assets/images/background.jpg')} // Mismo fondo
+      source={require('../assets/images/background.jpg')}
       style={styles.background}
       resizeMode="cover"
     >
@@ -38,7 +38,6 @@ export default function LoginScreen() {
         >
           <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
 
-            {/* TÍTULO SVG (Igual que en el registro) */}
             <View style={{ height: 70, width: '100%', marginBottom: 30, justifyContent: 'center', alignItems: 'center' }}>
               <Svg height="100%" width="100%">
                 <SvgText
@@ -56,7 +55,6 @@ export default function LoginScreen() {
               </Svg>
             </View>
 
-            {/* FORMULARIO DE LOGIN (Solo 2 campos) */}
             <View style={styles.formContainer}>
               <TextInput
                 style={styles.input}
@@ -70,11 +68,9 @@ export default function LoginScreen() {
                 secureTextEntry={true}
               />
 
-              {/* Botón Principal */}
               <TouchableOpacity 
                 style={styles.loginButton}
-                // CAMBIA ESTA LÍNEA para que vaya a la pantalla principal
-                onPress={() => router.replace('/main')}
+                onPress={() => router.replace('/menu')}
               >
                 <Text style={styles.loginButtonText}>Entrar</Text>
               </TouchableOpacity>
@@ -83,10 +79,8 @@ export default function LoginScreen() {
           </ScrollView>
         </KeyboardAvoidingView>
 
-        {/* BOTÓN ESQUINA: Ir a registro */}
         <TouchableOpacity
           style={styles.registerButtonCorner}
-          // Si no tiene cuenta, le mandamos a la pantalla de registro
           onPress={() => router.push('/register')} 
         >
           <Text style={styles.registerButtonCornerText}>No tengo cuenta</Text>
@@ -97,7 +91,6 @@ export default function LoginScreen() {
   );
 }
 
-// Los estilos son exactamente los mismos que en register.tsx para mantener la coherencia
 const styles = StyleSheet.create({
   background: {
     flex: 1,

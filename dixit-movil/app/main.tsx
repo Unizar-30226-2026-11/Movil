@@ -9,10 +9,37 @@ import * as SplashScreen from 'expo-splash-screen';
 import Svg, { Text as SvgText } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons'; 
 import { useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
+
 
 SplashScreen.preventAutoHideAsync();
 
+const MODES_CONFIG: Record<string, {
+  label: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  color: string;
+}> = {
+  classic: {
+    label: 'DIXIT CLÁSICO',
+    icon: 'color-wand-outline',
+    color: '#FCEEB5',
+  },
+  stella: {
+    label: 'STELLA',
+    icon: 'sparkles-outline',
+    color: '#a29bfe',
+  },
+};
+
 export default function MainScreen() {
+  const { mode } = useLocalSearchParams<{ mode?: string }>();
+  const currentMode =
+    (mode && MODES_CONFIG[mode]) ||
+    {
+      label: 'MODO DESCONOCIDO',
+      icon: 'help-circle-outline',
+      color: '#FCEEB5',
+    };
   const router = useRouter();
   const [loaded, error] = useFonts({
     'FuenteTitulo': require('../assets/fonts/fuente-dilana.ttf'), 
@@ -26,7 +53,6 @@ export default function MainScreen() {
   const [buscando, setBuscando] = useState(false);
   const [socialVisible, setSocialVisible] = useState(false);
 
-  // --- ESTADOS PARA LA CARTA DE LA COMUNIDAD ---
   const [votos, setVotos] = useState(458);
   const [miVoto, setMiVoto] = useState(0); // 1 (positivo), -1 (negativo), 0 (sin voto)
 
@@ -69,14 +95,11 @@ export default function MainScreen() {
     }, 3000);
   };
 
-  // Función para manejar los votos de la carta de la comunidad
   const manejarVoto = (tipo: number) => {
     if (miVoto === tipo) {
-      // Si ya había votado lo mismo, se cancela el voto
       setMiVoto(0);
       setVotos(votos - tipo);
     } else {
-      // Si vota algo nuevo, sumamos la diferencia
       setVotos(votos - miVoto + tipo);
       setMiVoto(tipo);
     }
@@ -101,7 +124,6 @@ export default function MainScreen() {
       resizeMode="cover"
     >
       <SafeAreaView style={styles.safeArea}>
-        {/* CABECERA */}
         <View style={styles.header}>
           <View style={styles.headerTitleContainer}>
             <Svg height="100%" width="100%" viewBox="0 0 300 50">
@@ -110,6 +132,7 @@ export default function MainScreen() {
               </SvgText>
             </Svg>
           </View>
+          
           <View style={styles.headerIcons}>
             <TouchableOpacity style={{ padding: 5 }} onPress={() => router.push('/store')}>
               <Ionicons name="cart-outline" size={26} color="#FCEEB5" />
@@ -126,8 +149,17 @@ export default function MainScreen() {
           </View>
         </View>
 
-        {/* CONTENIDO PRINCIPAL */}
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          <View style={[styles.modeBanner, { borderColor: currentMode.color }]}>
+            <Ionicons
+              name={currentMode.icon}
+              size={16}
+              color={currentMode.color}
+            />
+            <Text style={[styles.modeBannerText, { color: currentMode.color }]}>
+              {currentMode.label}
+            </Text>
+          </View>
           
           <TouchableOpacity style={styles.accordionButton} activeOpacity={0.8} onPress={() => setCartasDesplegadas(!cartasDesplegadas)}>
             <Text style={styles.accordionText}>Mis Cartas (12/256)</Text>
@@ -154,9 +186,6 @@ export default function MainScreen() {
             </View>
           )}
 
-          {/* ========================================= */}
-          {/* NUEVO BLOQUE: CARTA DE LA COMUNIDAD */}
-          {/* ========================================= */}
           <View style={styles.communityPanel}>
             <Text style={styles.communityTitle}>Carta de la Comunidad:</Text>
             
@@ -171,7 +200,6 @@ export default function MainScreen() {
             <Text style={styles.communitySubtitle}>Donde nacen las sombras</Text>
 
             <View style={styles.communityFooter}>
-              {/* Controles de Votos */}
               <View style={styles.voteControls}>
                 <TouchableOpacity 
                   style={[styles.voteButton, miVoto === 1 && styles.voteButtonActiveUp]} 
@@ -192,7 +220,6 @@ export default function MainScreen() {
                 </View>
               </View>
 
-              {/* Estrellas */}
               <View style={styles.starsContainer}>
                 <Ionicons name="star" size={20} color="#2c3e50" />
                 <Ionicons name="star" size={20} color="#2c3e50" />
@@ -202,7 +229,6 @@ export default function MainScreen() {
               </View>
             </View>
           </View>
-          {/* ========================================= */}
 
           <View style={styles.panel}>
             <View style={styles.panelHeader}>
@@ -256,8 +282,6 @@ export default function MainScreen() {
           </View>
         </ScrollView>
 
-        {/* MODALES Y PANELES LATERALES */}
-        {/* ... (Modal de selección de mapa/mazo) ... */}
         <Modal animationType="fade" transparent={true} visible={modalVisible} onRequestClose={() => setModalVisible(false)}>
           <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setModalVisible(false)}>
             <View style={styles.modalContent}>
@@ -276,7 +300,6 @@ export default function MainScreen() {
           </TouchableOpacity>
         </Modal>
 
-        {/* Panel Social */}
         {socialVisible && (
           <View style={styles.socialOverlayAbsolute}>
             <TouchableOpacity style={styles.socialModalOverlay} activeOpacity={1} onPress={() => setSocialVisible(false)} />
@@ -362,12 +385,11 @@ const styles = StyleSheet.create({
   unlockedOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.15)', justifyContent: 'flex-end', alignItems: 'center', paddingBottom: 8 },
   cardText: { color: '#FFFFFF', fontSize: 12, fontWeight: 'bold', textAlign: 'center', textShadowColor: 'rgba(0,0,0,0.9)', textShadowOffset: { width: 1, height: 1 }, textShadowRadius: 4 },
 
-  // --- ESTILOS DE LA CARTA DE LA COMUNIDAD ---
   communityPanel: { 
     backgroundColor: 'rgba(238, 242, 245, 0.95)', 
     borderRadius: 15, 
     padding: 15,
-    shadowColor: "red", // Le da ese toque rojizo de tu diseño
+    shadowColor: "red", 
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.15,
     shadowRadius: 15,
@@ -376,7 +398,7 @@ const styles = StyleSheet.create({
   communityTitle: { fontSize: 18, color: '#2c3e50', marginBottom: 15 },
   communityImageContainer: {
     width: '100%',
-    aspectRatio: 0.75, // Formato carta alta
+    aspectRatio: 0.75,
     borderRadius: 15,
     overflow: 'hidden',
     marginBottom: 15,
@@ -393,12 +415,11 @@ const styles = StyleSheet.create({
     alignItems: 'center', 
     justifyContent: 'center' 
   },
-  voteButtonActiveUp: { backgroundColor: '#2ecc71' }, // Verde si votas positivo
-  voteButtonActiveDown: { backgroundColor: '#e74c3c' }, // Rojo si votas negativo
+  voteButtonActiveUp: { backgroundColor: '#2ecc71' },
+  voteButtonActiveDown: { backgroundColor: '#e74c3c' },
   voteBadge: { backgroundColor: '#2c3e50', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6 },
   voteBadgeText: { color: 'white', fontWeight: 'bold', fontSize: 12 },
   starsContainer: { flexDirection: 'row', gap: 2 },
-  // -------------------------------------------
 
   panel: { backgroundColor: 'rgba(238, 242, 245, 0.9)', borderRadius: 15, padding: 15 },
   panelHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
@@ -450,4 +471,22 @@ const styles = StyleSheet.create({
   messageFriendButtonText: { color: '#FCEEB5', fontSize: 12 },
   addFriendButton: { backgroundColor: '#A8C8C0', margin: 20, paddingVertical: 15, borderRadius: 30, alignItems: 'center', shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 3, elevation: 5 },
   addFriendButtonText: { fontSize: 18, fontWeight: 'bold', color: '#2c3e50' },
+  modeBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(10, 25, 40, 0.85)',
+    borderWidth: 1,
+    paddingVertical: 8,
+    borderRadius: 20,
+    alignSelf: 'center',
+    paddingHorizontal: 20,
+  },
+
+  modeBannerText: {
+    fontWeight: 'bold',
+    letterSpacing: 1,
+    fontSize: 13,
+  },
 });
