@@ -140,7 +140,7 @@ export default function MainScreen() {
             <TouchableOpacity style={{ padding: 5 }} onPress={() => setSocialVisible(true)}>
               <Ionicons name="people-outline" size={26} color="#FCEEB5" />
             </TouchableOpacity>
-            <TouchableOpacity style={{ padding: 5 }}>
+            <TouchableOpacity style={{ padding: 5 }} onPress={() => router.push('/profile')}>
               <Ionicons name="person-circle-outline" size={26} color="#FCEEB5" />
             </TouchableOpacity>
             <TouchableOpacity style={{ padding: 5 }} onPress={() => router.push('/setting')}>

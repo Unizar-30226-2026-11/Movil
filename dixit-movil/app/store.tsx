@@ -69,7 +69,14 @@ export default function StoreScreen() {
     >
       <SafeAreaView style={styles.safeArea}>
 
+        {/* CABECERA ACTUALIZADA CON BOTÓN DE ATRÁS */}
         <View style={styles.header}>
+          
+          {/* BOTÓN ATRÁS (Añadido aquí) */}
+          <TouchableOpacity onPress={() => router.back()} style={{ padding: 5, marginRight: 5 }}>
+            <Ionicons name="arrow-back" size={28} color="#FCEEB5" />
+          </TouchableOpacity>
+
           <View style={styles.headerTitleContainer}>
             <Svg height="100%" width="100%" viewBox="0 0 300 50">
               <SvgText
@@ -87,15 +94,16 @@ export default function StoreScreen() {
           </View>
 
           <View style={styles.headerIcons}>
-            <TouchableOpacity onPress={() => router.push('/main')}>
+            {/* Se mantiene el botón de home que ya tenía tu compañero */}
+            <TouchableOpacity onPress={() => router.push('/menu')} style={{ padding: 5 }}>
               <Ionicons name="home-outline" size={26} color="#FCEEB5" />
             </TouchableOpacity>
 
-            <TouchableOpacity>
+            <TouchableOpacity onPress={() => router.push('/profile')} style={{ padding: 5 }}>
               <Ionicons name="person-circle-outline" size={26} color="#FCEEB5" />
             </TouchableOpacity>
 
-            <TouchableOpacity onPress={() => router.push('/setting')}>
+            <TouchableOpacity onPress={() => router.push('/setting')} style={{ padding: 5 }}>
               <Ionicons name="settings-outline" size={26} color="#FCEEB5" />
             </TouchableOpacity>
           </View>
@@ -196,19 +204,21 @@ const styles = StyleSheet.create({
   background: { flex: 1 },
   safeArea: { flex: 1, backgroundColor: 'rgba(0,0,0,0.1)' },
 
+  // Añado zIndex y elevation para mantener la consistencia y que los botones no fallen
   header: {
+    zIndex: 20,
+    elevation: 20,
     backgroundColor: 'rgba(10, 25, 40, 0.95)',
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'center', // Simplifico esto porque ahora hay botón a la izquierda y derecha
     paddingHorizontal: 15,
     paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: '#FCEEB5',
   },
 
-  headerTitleContainer: { flex: 1, height: 50, marginRight: 10 },
-  headerIcons: { flexDirection: 'row', gap: 15 },
+  headerTitleContainer: { flex: 1, height: 40 }, // Ajuste de altura similar al resto de pantallas
+  headerIcons: { flexDirection: 'row', gap: 5 },
 
   scrollContent: { padding: 20 },
 
