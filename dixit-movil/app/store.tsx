@@ -87,12 +87,8 @@ export default function StoreScreen() {
           </View>
 
           <View style={styles.headerIcons}>
-            <TouchableOpacity onPress={() => router.back()}>
+            <TouchableOpacity onPress={() => router.push('/main')}>
               <Ionicons name="home-outline" size={26} color="#FCEEB5" />
-            </TouchableOpacity>
-
-            <TouchableOpacity>
-              <Ionicons name="people-outline" size={26} color="#FCEEB5" />
             </TouchableOpacity>
 
             <TouchableOpacity>
