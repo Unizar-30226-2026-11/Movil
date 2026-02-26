@@ -125,12 +125,6 @@ export default function GameScreen() {
             <TouchableOpacity style={{ padding: 5 }} onPress={() => router.push('/store')}>
               <Ionicons name="cart-outline" size={26} color="#FCEEB5" />
             </TouchableOpacity>
-            <TouchableOpacity style={{ padding: 5 }}>
-              <Ionicons name="people-outline" size={26} color="#FCEEB5" />
-            </TouchableOpacity>
-            <TouchableOpacity style={{ padding: 5 }}>
-              <Ionicons name="person-circle-outline" size={26} color="#FCEEB5" />
-            </TouchableOpacity>
             <TouchableOpacity style={{ padding: 5 }} onPress={() => router.push('/setting')}>
               <Ionicons name="settings-outline" size={26} color="#FCEEB5" />
             </TouchableOpacity>

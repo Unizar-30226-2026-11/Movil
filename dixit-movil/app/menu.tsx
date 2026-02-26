@@ -66,11 +66,7 @@ export default function MenuScreen() {
               <Ionicons name="cart-outline" size={26} color="#FCEEB5" />
             </TouchableOpacity>
 
-            <TouchableOpacity>
-              <Ionicons name="people-outline" size={26} color="#FCEEB5" />
-            </TouchableOpacity>
-
-            <TouchableOpacity>
+            <TouchableOpacity onPress={() => router.push('/profile')}>
               <Ionicons name="person-circle-outline" size={26} color="#FCEEB5" />
             </TouchableOpacity>
 

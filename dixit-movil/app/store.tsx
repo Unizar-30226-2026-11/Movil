@@ -95,7 +95,7 @@ export default function StoreScreen() {
 
           <View style={styles.headerIcons}>
             {/* Se mantiene el botón de home que ya tenía tu compañero */}
-            <TouchableOpacity onPress={() => router.push('/menu')} style={{ padding: 5 }}>
+            <TouchableOpacity onPress={() => router.replace('/menu')} style={{ padding: 5 }}>
               <Ionicons name="home-outline" size={26} color="#FCEEB5" />
             </TouchableOpacity>
 

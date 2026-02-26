@@ -98,11 +98,13 @@ export default function MainScreen() {
     setModalVisible(false); 
   };
 
+  // --- BUSCAR PARTIDA Y SALTAR AL JUEGO ---
   const iniciarBusqueda = () => {
     setBuscando(true);
     setTimeout(() => {
       setBuscando(false);
-      alert('¡Partida encontrada! Llevando a la sala...');
+      // En lugar del alert, navegamos a la pantalla del tablero
+      router.push('/gameScreen'); 
     }, 3000);
   };
 
@@ -187,7 +189,7 @@ export default function MainScreen() {
             <TouchableOpacity style={{ padding: 5 }} onPress={() => router.push('/profile')}>
               <Ionicons name="person-circle-outline" size={26} color="#FCEEB5" />
             </TouchableOpacity>
-            <TouchableOpacity style={{ padding: 5 }} onPress={() => router.push('/settings')}>
+            <TouchableOpacity style={{ padding: 5 }} onPress={() => router.push('/setting')}>
               <Ionicons name="settings-outline" size={26} color="#FCEEB5" />
             </TouchableOpacity>
           </View>
