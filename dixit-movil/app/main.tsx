@@ -15,7 +15,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 SplashScreen.preventAutoHideAsync();
 
-const API_URL = 'http://10.234.244.253:3000/api'; 
+const API_URL = 'http://172.20.10.7:3000/api'; 
 
 const MODES_CONFIG: Record<string, { label: string; icon: keyof typeof Ionicons.glyphMap; color: string; }> = {
   classic: { label: 'DIXIT CLÁSICO', icon: 'color-wand-outline', color: '#FCEEB5' },
@@ -54,6 +54,13 @@ export default function MainScreen() {
   const [nuevoAmigoNombre, setNuevoAmigoNombre] = useState('');
   
   const [cartas, setCartas] = useState<any[]>([]);
+
+  // Lógica de Lobbies (¡lo nuevo!)
+  const [salaActual, setSalaActual] = useState<any>(null);
+  const [salasPublicas, setSalasPublicas] = useState<any[]>([]);
+  const [modalSalasVisible, setModalSalasVisible] = useState(false);
+  const [modalUnirseVisible, setModalUnirseVisible] = useState(false);
+  const [codigoIngresado, setCodigoIngresado] = useState('');
 
   const opcionesMapa = ['El Bosque de los Susurros', 'Ciudad Espejismo', 'Ruinas del Tiempo', 'Aleatorio'];
   const opcionesMazo = ['Colección Surrealista', 'Colección Sketch', 'Colección Acuarela', 'Todos mezclados'];
@@ -103,7 +110,6 @@ export default function MainScreen() {
       console.log("Error cargando solicitudes:", error);
     }
   };
-
 
   const añadirAmigo = async () => {
     if (nuevoAmigoNombre.trim() === '') return;
@@ -169,6 +175,121 @@ export default function MainScreen() {
     ]);
   };
 
+  const fetchCartas = async () => {
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      if (!token) return;
+
+      const response = await fetch(`${API_URL}/users/cards`, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.cards) {
+        setCartas(data.cards);
+      }
+    } catch (error) {
+      console.log("Error cargando cartas:", error);
+    }
+  };
+
+  // Pillo la lista de salas públicas del servidor para el buscador
+  const cargarSalasPublicas = async () => {
+    setBuscando(true);
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      const timestamp = new Date().getTime(); // Anti-caché
+
+      const response = await fetch(`${API_URL}/lobbies?t=${timestamp}`, {
+        method: 'GET',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.lobbies) {
+        setSalasPublicas(data.lobbies);
+        setModalSalasVisible(true);
+      } else {
+        Alert.alert("Aviso", "No hay salas públicas ahora mismo.");
+      }
+    } catch (error) {
+      console.log("Error al buscar salas:", error);
+    } finally {
+      setBuscando(false);
+    }
+  };
+
+  // Creo mi propia sala en el backend
+const crearSala = async () => {
+    try {
+      // pillo el token de la sesion
+      const token = await AsyncStorage.getItem('userToken');
+      
+      // el router me pasa 'classic' o 'stella', pero el back los quiere con mayuscula inicial
+      const motorElegido = mode === 'stella' ? 'Stella' : 'Classic';
+
+      const response = await fetch(`${API_URL}/lobbies`, {
+        method: 'POST',
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          name: "Mi Super Partida", 
+          maxPlayers: 4,
+          engine: motorElegido,
+          isPrivate: false
+        })
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.lobby) {
+        setSalaActual(data.lobby);
+      } else {
+        // chivato para ver que rompe
+        console.log("Fallo del backend al crear sala:", data);
+        Alert.alert("Fallo del servidor", data.message || "Datos incorrectos (Error 400)");
+      }
+    } catch (error) {
+      console.log("Petada al crear sala:", error);
+    }
+  };
+
+  // Intento unirme a una sala usando el código que he metido a mano (o clickando en la lista)
+  const unirseASala = async (codigo: string) => {
+    if (!codigo.trim()) return;
+
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      const timestamp = new Date().getTime();
+
+      const response = await fetch(`${API_URL}/lobbies/${codigo.trim().toUpperCase()}?t=${timestamp}`, {
+        method: 'GET',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.lobby) {
+        setSalaActual(data.lobby);
+        setModalSalasVisible(false);
+        setModalUnirseVisible(false);
+        setCodigoIngresado('');
+        Alert.alert("¡Dentro!", "Te has unido a la sala.");
+      } else {
+        Alert.alert("Error", "No existe ninguna sala con ese código.");
+      }
+    } catch (error) {
+      console.log("Error al unirse:", error);
+    }
+  };
+
   useEffect(() => {
     if (loaded || error) SplashScreen.hideAsync();
     fetchAmigos();
@@ -185,11 +306,6 @@ export default function MainScreen() {
     setModalVisible(false); 
   };
 
-  const iniciarBusqueda = () => {
-    setBuscando(true);
-    setTimeout(() => { setBuscando(false); router.push('/gameScreen'); }, 3000);
-  };
-
   const manejarVoto = (tipo: number) => {
     if (miVoto === tipo) { setMiVoto(0); setVotos(votos - tipo); } 
     else { setVotos(votos - miVoto + tipo); setMiVoto(tipo); }
@@ -200,30 +316,6 @@ export default function MainScreen() {
     Alert.alert("Mensaje enviado", `A ${amigoMensaje.nombre}: "${textoMensaje}"`);
     setModalMensajeVisible(false);
     setTextoMensaje('');
-  };
-
-  const fetchCartas = async () => {
-    try {
-      const token = await AsyncStorage.getItem('userToken');
-      if (!token) return;
-
-      const response = await fetch(`${API_URL}/users/cards`, {
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      });
-
-      const data = await response.json();
-
-      console.log("RESPUESTA CARTAS:", data);
-
-      if (response.ok && data.cards) {
-        setCartas(data.cards);
-      }
-    } catch (error) {
-      console.log("Error cargando cartas:", error);
-    }
   };
 
   const invitarAmigo = (nombre: string) => { Alert.alert("Invitación enviada", `Has invitado a ${nombre} a tu sala.`); };
@@ -263,11 +355,7 @@ export default function MainScreen() {
             <Text style={styles.accordionText}>
               Mis Cartas ({cartas.reduce((acc, carta) => acc + (carta.quantity || 1), 0)}/256)
             </Text>
-            <Ionicons
-              name={cartasDesplegadas ? "chevron-up" : "chevron-down"}
-              size={24}
-              color="#2c3e50"
-            />
+            <Ionicons name={cartasDesplegadas ? "chevron-up" : "chevron-down"} size={24} color="#2c3e50" />
           </TouchableOpacity>
 
           {cartasDesplegadas && cartas.map((carta) => (
@@ -303,32 +391,67 @@ export default function MainScreen() {
             </View>
           </View>
 
+          {/* EL PANEL DE LA SALA REFORMADO */}
           <View style={styles.panel}>
             <View style={styles.panelHeader}>
-              <Text style={styles.panelTitle}>Sala actual:</Text>
-              <View style={styles.playerCountBadge}><Text style={styles.playerCountText}>1/8</Text></View>
+              <Text style={styles.panelTitle}>{salaActual ? `Sala: ${salaActual.name}` : 'Sala actual:'}</Text>
+              {salaActual && (
+                <View style={styles.playerCountBadge}>
+                  <Text style={styles.playerCountText}>{salaActual.players?.length || 1}/{salaActual.maxPlayers || 8}</Text>
+                </View>
+              )}
             </View>
-            <View style={styles.playerRow}>
-              <View style={styles.playerInfo}>
-                <View style={[styles.statusDot, {backgroundColor: '#FF6B6B'}]} /><Text style={styles.playerName}>Tú (Host)</Text>
-              </View>
-              <View style={styles.playerIcons}>
-                <Ionicons name="mic-outline" size={20} color="#2c3e50" /><Ionicons name="headset-outline" size={20} color="#2c3e50" />
-              </View>
-            </View>
-            <View style={[styles.playerRow, styles.emptyPlayerRow]}><Text style={styles.emptyPlayerText}>Esperando jugador...</Text></View>
-            <TouchableOpacity style={styles.inviteButton} onPress={() => setSocialVisible(true)}>
-              <Ionicons name="person-add-outline" size={18} color="#2c3e50" /><Text style={styles.inviteButtonText}>Invitar Amigo</Text>
-            </TouchableOpacity>
+
+            {salaActual ? (
+              <>
+                <View style={styles.codeContainer}>
+                  <Text style={styles.codeLabel}>CÓDIGO DE SALA</Text>
+                  <Text style={styles.codeText}>{salaActual.lobbyCode}</Text>
+                </View>
+
+                <View style={styles.playerRow}>
+                  <View style={styles.playerInfo}>
+                    <View style={[styles.statusDot, {backgroundColor: '#2ecc71'}]} /><Text style={styles.playerName}>Tú</Text>
+                  </View>
+                </View>
+
+                {salaActual.players && salaActual.players.length < salaActual.maxPlayers && (
+                  <View style={[styles.playerRow, styles.emptyPlayerRow]}>
+                    <Text style={styles.emptyPlayerText}>Esperando jugadores...</Text>
+                  </View>
+                )}
+
+                <TouchableOpacity style={styles.inviteButton} onPress={() => setSalaActual(null)}>
+                  <Ionicons name="exit-outline" size={18} color="#2c3e50" />
+                  <Text style={styles.inviteButtonText}>Salir de la sala</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <Text style={styles.emptyPlayerText}>No estás en ninguna sala ahora mismo.</Text>
+                <View style={{flexDirection: 'row', gap: 10, marginTop: 15}}>
+                  <TouchableOpacity style={[styles.inviteButton, {flex: 1, marginTop: 0}]} onPress={crearSala}>
+                    <Ionicons name="add-circle-outline" size={18} color="#2c3e50" />
+                    <Text style={styles.inviteButtonText}>Crear</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.inviteButton, {flex: 1, marginTop: 0}]} onPress={() => setModalUnirseVisible(true)}>
+                    <Ionicons name="enter-outline" size={18} color="#2c3e50" />
+                    <Text style={styles.inviteButtonText}>Unirse</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
           </View>
 
           <View style={styles.matchmakingContainer}>
             <TouchableOpacity style={styles.dropdownButton} onPress={() => abrirModal('mapa')}><Text style={styles.dropdownText}>{mapaSeleccionado}</Text><Ionicons name="chevron-down" size={20} color="#2c3e50" /></TouchableOpacity>
             <TouchableOpacity style={styles.dropdownButton} onPress={() => abrirModal('mazo')}><Text style={styles.dropdownText}>{mazoSeleccionado}</Text><Ionicons name="chevron-down" size={20} color="#2c3e50" /></TouchableOpacity>
-            <TouchableOpacity style={[styles.searchButton, buscando && styles.searchButtonActive]} onPress={iniciarBusqueda} disabled={buscando}>
+            
+            {/* ESTE ES EL BUSCADOR DE SALAS PÚBLICAS */}
+            <TouchableOpacity style={[styles.searchButton, buscando && styles.searchButtonActive]} onPress={cargarSalasPublicas} disabled={buscando}>
               {buscando ? (
                 <View style={styles.searchingRow}><ActivityIndicator size="small" color="#ffffff" /><Text style={styles.searchButtonTextActive}>Buscando...</Text></View>
-              ) : <Text style={styles.searchButtonText}>Buscar partida</Text>}
+              ) : <Text style={styles.searchButtonText}>Buscar partidas públicas</Text>}
             </TouchableOpacity>
           </View>
         </ScrollView>
@@ -342,6 +465,60 @@ export default function MainScreen() {
               ))}
             </View>
           </TouchableOpacity>
+        </Modal>
+
+        {/* MODAL PARA VER SALAS PÚBLICAS Y UNIRSE */}
+        <Modal visible={modalSalasVisible} transparent animationType="slide">
+          <View style={styles.formModalOverlay}>
+            <View style={[styles.formBox, {maxHeight: '80%'}]}>
+              <Text style={styles.formModalTitle}>Salas Disponibles</Text>
+              <ScrollView showsVerticalScrollIndicator={false}>
+                {salasPublicas.map((sala, index) => (
+                  <TouchableOpacity 
+                    key={index} 
+                    style={styles.lobbyItem}
+                    onPress={() => unirseASala(sala.lobbyCode)}
+                  >
+                    <View>
+                      <Text style={styles.lobbyName}>{sala.name}</Text>
+                      <Text style={styles.lobbyDetails}>Modo: {sala.engine}</Text>
+                    </View>
+                    <View style={styles.lobbyPlayersBadge}>
+                      <Text style={styles.lobbyPlayersText}>{sala.players?.length || 1}/{sala.maxPlayers || 8}</Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+                {salasPublicas.length === 0 && (
+                  <Text style={{textAlign: 'center', color: '#555'}}>No hay salas públicas ahora mismo.</Text>
+                )}
+              </ScrollView>
+              <TouchableOpacity style={[styles.formCancelButton, {width: '100%', marginTop: 20}]} onPress={() => setModalSalasVisible(false)}>
+                <Text style={styles.formButtonText}>Cerrar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        {/* MODAL PARA METER EL CÓDIGO A MANO */}
+        <Modal visible={modalUnirseVisible} transparent animationType="fade">
+          <View style={styles.formModalOverlay}>
+            <View style={styles.formBox}>
+              <Text style={styles.formModalTitle}>Unirse con Código</Text>
+              <TextInput 
+                style={[styles.formInput, {textTransform: 'uppercase', textAlign: 'center', fontSize: 24, letterSpacing: 5}]} 
+                placeholder="EJ: QIXQ" 
+                placeholderTextColor="#6b6b6b" 
+                maxLength={6}
+                value={codigoIngresado} 
+                onChangeText={setCodigoIngresado} 
+                autoFocus 
+              />
+              <View style={styles.formModalButtons}>
+                <TouchableOpacity style={styles.formCancelButton} onPress={() => setModalUnirseVisible(false)}><Text style={styles.formButtonText}>Cancelar</Text></TouchableOpacity>
+                <TouchableOpacity style={styles.formSaveButton} onPress={() => unirseASala(codigoIngresado)}><Text style={styles.formButtonText}>Entrar</Text></TouchableOpacity>
+              </View>
+            </View>
+          </View>
         </Modal>
 
         {socialVisible && (
@@ -447,12 +624,12 @@ const styles = StyleSheet.create({
   starsContainer: { flexDirection: 'row', gap: 2 },
   panel: { backgroundColor: 'rgba(238, 242, 245, 0.9)', borderRadius: 15, padding: 15 },
   panelHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
-  panelTitle: { fontSize: 18, color: '#2c3e50' },
+  panelTitle: { fontSize: 18, color: '#2c3e50', fontWeight: 'bold' },
   playerCountBadge: { backgroundColor: '#1a2a3a', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
   playerCountText: { color: '#FCEEB5', fontWeight: 'bold' },
   playerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.05)', padding: 10, borderRadius: 8, marginBottom: 8 },
   emptyPlayerRow: { backgroundColor: 'rgba(0,0,0,0.02)', borderStyle: 'dashed', borderWidth: 1, borderColor: '#95a5a6', justifyContent: 'center' },
-  emptyPlayerText: { color: '#7f8c8d', fontStyle: 'italic' },
+  emptyPlayerText: { color: '#7f8c8d', fontStyle: 'italic', textAlign: 'center' },
   playerInfo: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   statusDot: { width: 12, height: 12, borderRadius: 6 },
   playerName: { fontSize: 16, color: '#2c3e50', fontWeight: '500' },
@@ -497,4 +674,14 @@ const styles = StyleSheet.create({
   formCancelButton: { backgroundColor: '#FF6B6B', padding: 12, borderRadius: 10, width: '48%', alignItems: 'center' },
   formSaveButton: { backgroundColor: '#A8C8C0', padding: 12, borderRadius: 10, width: '48%', alignItems: 'center' },
   formButtonText: { color: 'white', fontWeight: 'bold' },
+  
+  // Novedades para el panel del Lobby
+  codeContainer: { backgroundColor: '#2c3e50', padding: 15, borderRadius: 10, alignItems: 'center', marginBottom: 15 },
+  codeLabel: { color: '#8caea6', fontSize: 12, fontWeight: 'bold', marginBottom: 5, letterSpacing: 1 },
+  codeText: { color: '#FCEEB5', fontSize: 32, fontWeight: 'bold', letterSpacing: 6 },
+  lobbyItem: { backgroundColor: '#dce8e3', padding: 15, borderRadius: 10, marginBottom: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: 1, borderColor: '#A8C8C0' },
+  lobbyName: { fontSize: 16, fontWeight: 'bold', color: '#2c3e50' },
+  lobbyDetails: { fontSize: 13, color: '#555', marginTop: 4 },
+  lobbyPlayersBadge: { backgroundColor: '#2c3e50', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
+  lobbyPlayersText: { color: '#FCEEB5', fontWeight: 'bold' },
 });
