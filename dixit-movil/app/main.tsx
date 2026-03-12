@@ -54,7 +54,6 @@ export default function MainScreen() {
   const [nuevoAmigoNombre, setNuevoAmigoNombre] = useState('');
   
   const [cartas, setCartas] = useState<any[]>([]);
-  const [todasLasCartas, setTodasLasCartas] = useState<any[]>([]);
 
   const opcionesMapa = ['El Bosque de los Susurros', 'Ciudad Espejismo', 'Ruinas del Tiempo', 'Aleatorio'];
   const opcionesMazo = ['Colección Surrealista', 'Colección Sketch', 'Colección Acuarela', 'Todos mezclados'];
@@ -174,7 +173,7 @@ export default function MainScreen() {
     if (loaded || error) SplashScreen.hideAsync();
     fetchAmigos();
     fetchSolicitudes();
-    fetchCollectionCards();
+    fetchCartas();
   }, [loaded, error]);
 
   if (!loaded && !error) return null;
@@ -203,53 +202,13 @@ export default function MainScreen() {
     setTextoMensaje('');
   };
 
-
-  const fetchCollectionCards = async () => {
+  const fetchCartas = async () => {
     try {
-      const token = await AsyncStorage.getItem("userToken");
+      const token = await AsyncStorage.getItem('userToken');
+      if (!token) return;
 
-      const resCollections = await fetch(`${API_URL}/collections`, {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      });
-
-      const collectionsData = await resCollections.json();
-
-      console.log("COLLECTIONS:", collectionsData);
-
-      const collections = collectionsData.collections?.collections || [];
-
-      if (collections.length === 0) {
-        return;
-      }
-
-      const collectionId = collections[0].id;
-
-      const resCards = await fetch(`${API_URL}/collections/${collectionId}/cards`, {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      });
-
-      const cardsData = await resCards.json();
-
-      console.log("COLLECTION CARDS:", cardsData);
-
-      if (cardsData.cards) {
-        setTodasLasCartas(cardsData.cards);
-      }
-
-    } catch (error) {
-      console.log("Error cargando colección:", error);
-    }
-  };
-
-  const fetchDecks = async () => {
-    try {
-      const token = await AsyncStorage.getItem("userToken");
-
-      const response = await fetch(`${API_URL}/users/decks`, {
+      const response = await fetch(`${API_URL}/users/cards`, {
+        method: 'GET',
         headers: {
           Authorization: `Bearer ${token}`
         }
@@ -257,23 +216,17 @@ export default function MainScreen() {
 
       const data = await response.json();
 
-      console.log("USER DECKS:", data);
+      console.log("RESPUESTA CARTAS:", data);
 
-      if (data.decks) {
-        const cardIds = data.decks.flatMap((deck: any) => deck.cardIds || []);
-        setCartas(cardIds);
+      if (response.ok && data.cards) {
+        setCartas(data.cards);
       }
-
     } catch (error) {
-      console.log("Error cargando mazos:", error);
+      console.log("Error cargando cartas:", error);
     }
   };
 
   const invitarAmigo = (nombre: string) => { Alert.alert("Invitación enviada", `Has invitado a ${nombre} a tu sala.`); };
-
-  const cartasJugador = todasLasCartas.filter((carta: any) =>
-    cartas.includes(carta.id)
-  );
 
   const opcionesActuales = tipoModal === 'mapa' ? opcionesMapa : opcionesMazo;
   const amigosFiltrados = amigos.filter(a => a.nombre.toLowerCase().includes(searchQuery.toLowerCase()));
@@ -307,20 +260,22 @@ export default function MainScreen() {
           </View>
           
           <TouchableOpacity style={styles.accordionButton} activeOpacity={0.8} onPress={() => setCartasDesplegadas(!cartasDesplegadas)}>
-            <Text style={styles.accordionText}>Mis Cartas ({cartasJugador.length}/256)</Text>
-            <Ionicons name={cartasDesplegadas ? "chevron-up" : "chevron-down"} size={24} color="#2c3e50" />
+            <Text style={styles.accordionText}>
+              Mis Cartas ({cartas.reduce((acc, carta) => acc + (carta.quantity || 1), 0)}/256)
+            </Text>
+            <Ionicons
+              name={cartasDesplegadas ? "chevron-up" : "chevron-down"}
+              size={24}
+              color="#2c3e50"
+            />
           </TouchableOpacity>
 
-          {cartasJugador.map((carta) => (
-            <View key={carta.id} style={styles.cardShadowWrapper}>
+          {cartasDesplegadas && cartas.map((carta) => (
+            <View key={carta.cardId} style={styles.cardShadowWrapper}>
               <View style={styles.cardInner}>
-                <Image
-                  source={{ uri: carta.imageUrl }}
-                  style={styles.cardImageAbsolute}
-                  resizeMode="cover"
-                />
-                <View style={styles.unlockedOverlay}>
+                <View style={styles.lockedOverlay}>
                   <Text style={styles.cardText}>{carta.name}</Text>
+                  <Text style={styles.cardText}>x{carta.quantity}</Text>
                 </View>
               </View>
             </View>
