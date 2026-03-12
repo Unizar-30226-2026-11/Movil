@@ -10,7 +10,7 @@ import Svg, { Text as SvgText } from 'react-native-svg';
 
 SplashScreen.preventAutoHideAsync();
 
-const API_URL = 'http://192.168.1.20:3000/api';
+const API_URL = 'http://10.234.244.253:3000/api';
 
 export default function RegisterScreen() {
   const router = useRouter();

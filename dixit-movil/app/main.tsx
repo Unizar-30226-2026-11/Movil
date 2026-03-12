@@ -1,8 +1,9 @@
 import { 
   StyleSheet, Text, View, ImageBackground, Image, 
   TouchableOpacity, ScrollView, SafeAreaView, Modal, ActivityIndicator, 
-  Platform, StatusBar, TextInput, Alert 
+  TextInput, Alert 
 } from 'react-native';
+
 import { useFonts } from 'expo-font';
 import { useEffect, useState } from 'react';
 import * as SplashScreen from 'expo-splash-screen';
@@ -14,7 +15,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 SplashScreen.preventAutoHideAsync();
 
-const API_URL = 'http://192.168.1.20:3000/api'; 
+const API_URL = 'http://10.234.244.253:3000/api'; 
 
 const MODES_CONFIG: Record<string, { label: string; icon: keyof typeof Ionicons.glyphMap; color: string; }> = {
   classic: { label: 'DIXIT CLÁSICO', icon: 'color-wand-outline', color: '#FCEEB5' },
@@ -36,9 +37,8 @@ export default function MainScreen() {
   const [tipoModal, setTipoModal] = useState(''); 
   const [buscando, setBuscando] = useState(false);
   
-  // --- ESTADOS SOCIALES ---
   const [socialVisible, setSocialVisible] = useState(false);
-  const [verPeticiones, setVerPeticiones] = useState(false); // Nuevo control para el botón de peticiones
+  const [verPeticiones, setVerPeticiones] = useState(false); 
   const [votos, setVotos] = useState(458);
   const [miVoto, setMiVoto] = useState(0); 
   
@@ -52,17 +52,13 @@ export default function MainScreen() {
   const [textoMensaje, setTextoMensaje] = useState('');
   const [modalAñadirVisible, setModalAñadirVisible] = useState(false);
   const [nuevoAmigoNombre, setNuevoAmigoNombre] = useState('');
+  
+  const [cartas, setCartas] = useState<any[]>([]);
+  const [todasLasCartas, setTodasLasCartas] = useState<any[]>([]);
 
-  const coleccionSurrealista = [
-    { id: '1', bloqueada: true, imagen: 'https://images.unsplash.com/photo-1494438639946-1ebd1d20bf85?auto=format&fit=crop&w=400&q=80' },
-    { id: '2', bloqueada: false, nombre: 'Ojo', imagen: 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?auto=format&fit=crop&w=400&q=80' },
-    { id: '3', bloqueada: false, nombre: 'Pájaros', imagen: 'https://images.unsplash.com/photo-1518640467707-6811f4a6ab73?auto=format&fit=crop&w=400&q=80' },
-    { id: '4', bloqueada: true, imagen: 'https://images.unsplash.com/photo-1534447677768-be436bb09401?auto=format&fit=crop&w=400&q=80' },
-  ];
   const opcionesMapa = ['El Bosque de los Susurros', 'Ciudad Espejismo', 'Ruinas del Tiempo', 'Aleatorio'];
   const opcionesMazo = ['Colección Surrealista', 'Colección Sketch', 'Colección Acuarela', 'Todos mezclados'];
 
-  // Cargar lista de amigos confirmados
   const fetchAmigos = async () => {
     try {
       const token = await AsyncStorage.getItem('userToken');
@@ -90,7 +86,6 @@ export default function MainScreen() {
     }
   };
 
-  // Cargar solicitudes pendientes
   const fetchSolicitudes = async () => {
     try {
       const token = await AsyncStorage.getItem('userToken');
@@ -109,6 +104,7 @@ export default function MainScreen() {
       console.log("Error cargando solicitudes:", error);
     }
   };
+
 
   const añadirAmigo = async () => {
     if (nuevoAmigoNombre.trim() === '') return;
@@ -150,7 +146,7 @@ export default function MainScreen() {
 
       if (response.ok) {
         setSolicitudes(solicitudes.filter(r => r.id !== requestId));
-        fetchAmigos(); // Refrescamos la lista para ver al nuevo amigo inmediatamente
+        fetchAmigos();
         Alert.alert("Social", accion === 'accept' ? "¡Solicitud aceptada!" : "Solicitud rechazada");
       }
     } catch (error) {
@@ -178,6 +174,7 @@ export default function MainScreen() {
     if (loaded || error) SplashScreen.hideAsync();
     fetchAmigos();
     fetchSolicitudes();
+    fetchCollectionCards();
   }, [loaded, error]);
 
   if (!loaded && !error) return null;
@@ -206,7 +203,77 @@ export default function MainScreen() {
     setTextoMensaje('');
   };
 
+
+  const fetchCollectionCards = async () => {
+    try {
+      const token = await AsyncStorage.getItem("userToken");
+
+      const resCollections = await fetch(`${API_URL}/collections`, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+
+      const collectionsData = await resCollections.json();
+
+      console.log("COLLECTIONS:", collectionsData);
+
+      const collections = collectionsData.collections?.collections || [];
+
+      if (collections.length === 0) {
+        return;
+      }
+
+      const collectionId = collections[0].id;
+
+      const resCards = await fetch(`${API_URL}/collections/${collectionId}/cards`, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+
+      const cardsData = await resCards.json();
+
+      console.log("COLLECTION CARDS:", cardsData);
+
+      if (cardsData.cards) {
+        setTodasLasCartas(cardsData.cards);
+      }
+
+    } catch (error) {
+      console.log("Error cargando colección:", error);
+    }
+  };
+
+  const fetchDecks = async () => {
+    try {
+      const token = await AsyncStorage.getItem("userToken");
+
+      const response = await fetch(`${API_URL}/users/decks`, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+
+      const data = await response.json();
+
+      console.log("USER DECKS:", data);
+
+      if (data.decks) {
+        const cardIds = data.decks.flatMap((deck: any) => deck.cardIds || []);
+        setCartas(cardIds);
+      }
+
+    } catch (error) {
+      console.log("Error cargando mazos:", error);
+    }
+  };
+
   const invitarAmigo = (nombre: string) => { Alert.alert("Invitación enviada", `Has invitado a ${nombre} a tu sala.`); };
+
+  const cartasJugador = todasLasCartas.filter((carta: any) =>
+    cartas.includes(carta.id)
+  );
 
   const opcionesActuales = tipoModal === 'mapa' ? opcionesMapa : opcionesMazo;
   const amigosFiltrados = amigos.filter(a => a.nombre.toLowerCase().includes(searchQuery.toLowerCase()));
@@ -240,31 +307,25 @@ export default function MainScreen() {
           </View>
           
           <TouchableOpacity style={styles.accordionButton} activeOpacity={0.8} onPress={() => setCartasDesplegadas(!cartasDesplegadas)}>
-            <Text style={styles.accordionText}>Mis Cartas (12/256)</Text>
+            <Text style={styles.accordionText}>Mis Cartas ({cartasJugador.length}/256)</Text>
             <Ionicons name={cartasDesplegadas ? "chevron-up" : "chevron-down"} size={24} color="#2c3e50" />
           </TouchableOpacity>
 
-          {cartasDesplegadas && (
-            <View style={styles.cardsGridContainer}>
-              <Text style={styles.collectionTitle}>Colección Surrealista:</Text>
-              <View style={styles.cardsGrid}>
-                {coleccionSurrealista.map((carta) => (
-                  <View key={carta.id} style={styles.cardShadowWrapper}>
-                    <View style={styles.cardInner}>
-                      <Image source={{ uri: carta.imagen }} style={styles.cardImageAbsolute} resizeMode="cover" />
-                      {carta.bloqueada ? (
-                        <View style={styles.lockedOverlay}><Ionicons name="lock-closed" size={28} color="#FCEEB5" /></View>
-                      ) : (
-                        <View style={styles.unlockedOverlay}><Text style={styles.cardText}>{carta.nombre}</Text></View>
-                      )}
-                    </View>
-                  </View>
-                ))}
+          {cartasJugador.map((carta) => (
+            <View key={carta.id} style={styles.cardShadowWrapper}>
+              <View style={styles.cardInner}>
+                <Image
+                  source={{ uri: carta.imageUrl }}
+                  style={styles.cardImageAbsolute}
+                  resizeMode="cover"
+                />
+                <View style={styles.unlockedOverlay}>
+                  <Text style={styles.cardText}>{carta.name}</Text>
+                </View>
               </View>
             </View>
-          )}
+          ))}
 
-          {/* PANEL DE CARTA DE LA COMUNIDAD (MANTENIDO) */}
           <View style={styles.communityPanel}>
             <Text style={styles.communityTitle}>Carta de la Comunidad:</Text>
             <View style={styles.communityImageContainer}>
@@ -339,7 +400,6 @@ export default function MainScreen() {
               </View>
 
               <ScrollView contentContainerStyle={styles.socialScrollContent}>
-                {/* BOTÓN PARA VER PETICIONES PENDIENTES */}
                 <TouchableOpacity style={styles.accordionButton} onPress={() => setVerPeticiones(!verPeticiones)}>
                   <Text style={styles.accordionText}>Peticiones ({solicitudes.length})</Text>
                   <Ionicons name={verPeticiones ? "chevron-up" : "chevron-down"} size={20} color="#2c3e50" />
@@ -381,7 +441,6 @@ export default function MainScreen() {
           </View>
         )}
 
-        {/* MODAL AÑADIR AMIGO */}
         <Modal visible={modalAñadirVisible} transparent animationType="fade">
           <View style={styles.formModalOverlay}>
             <View style={styles.formBox}>

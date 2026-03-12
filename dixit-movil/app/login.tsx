@@ -11,7 +11,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 SplashScreen.preventAutoHideAsync();
 
-const API_URL = 'http://192.168.1.20:3000/api';
+const API_URL = 'http://10.234.244.253:3000/api';
 
 export default function LoginScreen() {
   const router = useRouter();

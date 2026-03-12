@@ -18,20 +18,17 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 SplashScreen.preventAutoHideAsync();
 
-// ¡Pon tu IP aquí!
-const API_URL = 'http://192.168.1.20:3000/api';
+const API_URL = 'http://10.234.244.253:3000/api';
 
 export default function MenuScreen() {
   const [loaded, error] = useFonts({
     'FuenteTitulo': require('../assets/fonts/fuente-dilana.ttf'),
   });
 
-  // --- ESTADOS PARA LOS DATOS DEL USUARIO ---
   const [username, setUsername] = useState<string>('Cargando...');
   const [coins, setCoins] = useState<number>(0);
   const [isLoadingProfile, setIsLoadingProfile] = useState(true);
 
-  // --- FUNCIÓN PARA PEDIR DATOS AL BACKEND ---
   const fetchUserProfile = async () => {
     try {
       const token = await AsyncStorage.getItem('userToken');
@@ -41,7 +38,6 @@ export default function MenuScreen() {
         return;
       }
 
-      // 1. Pedimos el perfil
       const responseProfile = await fetch(`${API_URL}/users/profile`, {
         method: 'GET',
         headers: {
@@ -52,7 +48,6 @@ export default function MenuScreen() {
 
       if (responseProfile.ok) {
         const dataProfile = await responseProfile.json();
-        // Según el Swagger, el nombre está en .profile.username
         if (dataProfile.profile && dataProfile.profile.username) {
           setUsername(dataProfile.profile.username);
         } else {
@@ -60,7 +55,6 @@ export default function MenuScreen() {
         }
       }
 
-      // 2. Pedimos las monedas (balance)
       const responseBalance = await fetch(`${API_URL}/users/balance`, {
         method: 'GET',
         headers: {
@@ -70,7 +64,6 @@ export default function MenuScreen() {
 
       if (responseBalance.ok) {
         const dataBalance = await responseBalance.json();
-        // Según el Swagger, las monedas están en .balance
         if (typeof dataBalance.balance === 'number') {
           setCoins(dataBalance.balance);
         } else {
@@ -87,7 +80,6 @@ export default function MenuScreen() {
   };
 
   useEffect(() => {
-    // Cuando la pantalla cargue, pedimos los datos
     fetchUserProfile();
   }, []);
 
@@ -146,7 +138,6 @@ export default function MenuScreen() {
           </View>
         </View>
 
-        {/* --- NUEVO PANEL DE USUARIO RECIÉN OBTENIDO DEL BACKEND --- */}
         <View style={styles.userBanner}>
           {isLoadingProfile ? (
              <ActivityIndicator color="#FCEEB5" />
@@ -221,7 +212,6 @@ const styles = StyleSheet.create({
   headerTitleContainer: { flex: 1, height: 50, marginRight: 10 },
   headerIcons: { flexDirection: 'row', gap: 15 },
 
-  /* --- ESTILOS DEL NUEVO PANEL DE USUARIO --- */
   userBanner: {
     backgroundColor: 'rgba(10, 25, 40, 0.8)',
     flexDirection: 'row',
@@ -258,7 +248,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
-  /* ------------------------------------------- */
 
   content: {
     flex: 1,

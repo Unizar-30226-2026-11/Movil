@@ -15,6 +15,9 @@ import * as SplashScreen from 'expo-splash-screen';
 import Svg, { Text as SvgText } from 'react-native-svg';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const API_URL = 'http://10.234.244.253:3000/api';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -26,40 +29,107 @@ export default function StoreScreen() {
   const [imagenSeleccionada, setImagenSeleccionada] = useState<string | null>(null);
   const [modalCompraVisible, setModalCompraVisible] = useState(false);
   const [productoSeleccionado, setProductoSeleccionado] = useState<any>(null);
+  const [productos, setProductos] = useState<any[]>([]);
+  const [coins, setCoins] = useState(0);
+
 
   useEffect(() => {
     if (loaded || error) {
       SplashScreen.hideAsync();
     }
+    fetchShopItems();
+    fetchBalance();
   }, [loaded, error]);
 
-  if (!loaded && !error) return null;
+  const fetchShopItems = async () => {
+    try {
+      const token = await AsyncStorage.getItem('userToken');
 
-  const productos = [
-    {
-      id: '1',
-      nombre: 'Mazo Onírico',
-      precio: 600,
-      imagen: 'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=900&q=80',
-    },
-    {
-      id: '2',
-      nombre: 'Mazo Fantasía',
-      precio: 900,
-      imagen: 'https://images.unsplash.com/photo-1492724441997-5dc865305da7?auto=format&fit=crop&w=900&q=80',
-    },
-    {
-      id: '3',
-      nombre: 'Mazo Surreal',
-      precio: 500,
-      imagen: 'https://images.unsplash.com/photo-1519125323398-675f0ddb6308?auto=format&fit=crop&w=900&q=80',
-    },
-  ];
+      const response = await fetch(`${API_URL}/shop/items`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    });
+
+    const data = await response.json();
+
+    console.log("SHOP ITEMS:", data);
+
+    if (data.items) {
+      setProductos(data.items);
+    }
+
+    } catch (error) {
+      console.log("Error cargando tienda:", error);
+    }
+  };
+
+  if (!loaded && !error) return null;
 
   const abrirCompra = (producto: any) => {
     setProductoSeleccionado(producto);
     setModalCompraVisible(true);
   };
+
+  const comprarProducto = async () => {
+    try {
+      const token = await AsyncStorage.getItem("userToken");
+
+      const response = await fetch(`${API_URL}/shop/buy`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          itemId: productoSeleccionado.id
+        })
+      });
+
+      const data = await response.json();
+
+      console.log("BUY RESPONSE:", data);
+
+      if (response.ok) {
+        await fetchBalance();
+        alert("Compra realizada");
+      } else {
+        alert(data.message || "No se pudo comprar");
+      }
+
+    } catch (error) {
+      console.log(error);
+    }
+  };
+
+
+  const fetchBalance = async () => {
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      if (!token) return;
+
+      const response = await fetch(`${API_URL}/users/balance`, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+
+      const data = await response.json();
+
+      console.log("BALANCE:", data);
+
+      if (typeof data.balance === 'number') {
+        setCoins(data.balance);
+      } else if (typeof data.coins === 'number') {
+        setCoins(data.coins);
+      }
+    } catch (error) {
+      console.log("Error cargando balance:", error);
+    }
+  };
+
 
   return (
     <ImageBackground
@@ -68,11 +138,7 @@ export default function StoreScreen() {
       resizeMode="cover"
     >
       <SafeAreaView style={styles.safeArea}>
-
-        {/* CABECERA ACTUALIZADA CON BOTÓN DE ATRÁS */}
         <View style={styles.header}>
-          
-          {/* BOTÓN ATRÁS (Añadido aquí) */}
           <TouchableOpacity onPress={() => router.back()} style={{ padding: 5, marginRight: 5 }}>
             <Ionicons name="arrow-back" size={28} color="#FCEEB5" />
           </TouchableOpacity>
@@ -94,7 +160,11 @@ export default function StoreScreen() {
           </View>
 
           <View style={styles.headerIcons}>
-            {/* Se mantiene el botón de home que ya tenía tu compañero */}
+            <View style={styles.coinsContainer}>
+              <Text style={styles.coinsText}>{coins}</Text>
+              <Ionicons name="cash" size={18} color="#FFD700" />
+            </View>
+
             <TouchableOpacity onPress={() => router.replace('/menu')} style={{ padding: 5 }}>
               <Ionicons name="home-outline" size={26} color="#FCEEB5" />
             </TouchableOpacity>
@@ -108,36 +178,31 @@ export default function StoreScreen() {
             </TouchableOpacity>
           </View>
         </View>
-
+        
         <ScrollView contentContainerStyle={styles.scrollContent}>
           <View style={styles.grid}>
             {productos.map((producto) => (
               <View key={producto.id} style={styles.cardContainer}>
-                
+
                 <TouchableOpacity
                   activeOpacity={0.9}
-                  onPress={() => setImagenSeleccionada(producto.imagen)}
+                  onPress={() => {}}
                 >
-                  <Image
-                    source={{ uri: producto.imagen }}
-                    style={styles.cardImage}
-                  />
+                  <View style={styles.cardImagePlaceholder}>
+                    <Ionicons name="cube-outline" size={40} color="#2c3e50" />
+                  </View>
                 </TouchableOpacity>
 
-                <Text style={styles.deckName}>{producto.nombre}</Text>
-
+                <Text style={styles.deckName}>{producto.name}</Text>
+                <Text style={styles.deckDescription}>{producto.description}</Text>
                 <View style={styles.cardFooter}>
-                  
-                <View style={styles.priceContainer}>
-                  <Ionicons 
-                    name="logo-bitcoin" 
-                    size={16} 
-                    color="#d4af37" 
-                  />
-                  <Text style={styles.priceText}>
-                    {producto.precio}
-                  </Text>
-                </View>
+
+                  <View style={styles.priceContainer}>
+                    <Ionicons name="logo-bitcoin" size={16} color="#d4af37" />
+                    <Text style={styles.priceText}>
+                      {producto.price}
+                    </Text>
+                  </View>
 
                   <TouchableOpacity
                     style={styles.buyButton}
@@ -185,7 +250,7 @@ export default function StoreScreen() {
                   style={styles.yesButton}
                   onPress={() => {
                     setModalCompraVisible(false);
-                    alert('Compra realizada');
+                    comprarProducto();
                   }}
                 >
                   <Text style={styles.confirmButtonText}>Sí</Text>
@@ -204,21 +269,39 @@ const styles = StyleSheet.create({
   background: { flex: 1 },
   safeArea: { flex: 1, backgroundColor: 'rgba(0,0,0,0.1)' },
 
-  // Añado zIndex y elevation para mantener la consistencia y que los botones no fallen
   header: {
     zIndex: 20,
     elevation: 20,
     backgroundColor: 'rgba(10, 25, 40, 0.95)',
     flexDirection: 'row',
-    alignItems: 'center', // Simplifico esto porque ahora hay botón a la izquierda y derecha
+    alignItems: 'center',
     paddingHorizontal: 15,
     paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: '#FCEEB5',
   },
 
-  headerTitleContainer: { flex: 1, height: 40 }, // Ajuste de altura similar al resto de pantallas
+  headerTitleContainer: { flex: 1, height: 40 },
   headerIcons: { flexDirection: 'row', gap: 5 },
+
+  coinsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: '#FFD700',
+    marginRight: 6,
+  },
+
+  coinsText: {
+    color: '#FFD700',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
 
   scrollContent: { padding: 20 },
 
@@ -329,5 +412,21 @@ const styles = StyleSheet.create({
   confirmButtonText: {
     color: 'white',
     fontWeight: 'bold',
+  },
+
+  cardImagePlaceholder: {
+    width: '100%',
+    aspectRatio: 0.75,
+    borderRadius: 14,
+    backgroundColor: '#dce8e3',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  deckDescription: {
+    fontSize: 12,
+    color: '#555',
+    textAlign: 'center',
+    marginTop: 4,
   },
 });

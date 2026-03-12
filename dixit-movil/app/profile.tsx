@@ -8,9 +8,10 @@ import * as SplashScreen from 'expo-splash-screen';
 import Svg, { Text as SvgText } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons'; 
 import { useRouter } from 'expo-router';
-import AsyncStorage from '@react-native-async-storage/async-storage'; // Memoria local
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 SplashScreen.preventAutoHideAsync();
+const API_URL = 'http://10.234.244.253:3000/api';
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -19,48 +20,85 @@ export default function ProfileScreen() {
     'FuenteTitulo': require('../assets/fonts/fuente-dilana.ttf'), 
   });
 
-  // --- ESTADOS DEL USUARIO ---
   const [usuario, setUsuario] = useState({
-    nombre: "Miguel",
-    titulo: "Rey del tablero",
-    nivel: 14,
+    nombre: '',
+    email: '',
+    titulo: 'Jugador',
+    nivel: 1,
     avatar: 'https://i.pravatar.cc/150?img=18',
     estadisticas: {
-      partidas: 42,
-      victorias: 28,
-      cartas: 64
+      partidas: 0,
+      victorias: 0,
+      cartas: 0
     }
   });
 
-  // --- ESTADOS PARA LOS MODALES ---
   const [modalPerfilVisible, setModalPerfilVisible] = useState(false);
   const [modalPasswordVisible, setModalPasswordVisible] = useState(false);
 
-  // Variables temporales para editar el perfil
   const [tempNombre, setTempNombre] = useState('');
   const [tempTitulo, setTempTitulo] = useState('');
 
-  // Variables para la contraseña
   const [passwordActual, setPasswordActual] = useState('');
   const [nuevaPassword, setNuevaPassword] = useState('');
   const [confirmarPassword, setConfirmarPassword] = useState('');
 
-  // --- CARGAR DATOS AL INICIAR ---
-  useEffect(() => {
-    const cargarPerfil = async () => {
-      try {
-        const perfilGuardado = await AsyncStorage.getItem('perfilUsuario');
-        if (perfilGuardado !== null) {
-          setUsuario(JSON.parse(perfilGuardado));
-        }
-      } catch (e) {
-        console.log("Error cargando perfil", e);
-      }
-    };
-    cargarPerfil();
-  }, []);
+  const fetchProfile = async () => {
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      if (!token) return;
 
-  // --- FUNCIONES DE GUARDADO ---
+      const response = await fetch(`${API_URL}/users/profile`, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.profile) {
+        setUsuario(prev => ({
+          ...prev,
+          nombre: data.profile.username || '',
+          email: data.profile.email || ''
+        }));
+      }
+    } catch (error) {
+      console.log('Error cargando perfil:', error);
+    }
+  };
+
+  const fetchCards = async () => {
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      if (!token) return;
+
+      const response = await fetch(`${API_URL}/users/cards`, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.cards) {
+        const totalCartas = data.cards.reduce((acc: number, carta: any) => acc + (carta.quantity || 1), 0);
+
+        setUsuario(prev => ({
+          ...prev,
+          estadisticas: {
+            ...prev.estadisticas,
+            cartas: totalCartas
+          }
+        }));
+      }
+    } catch (error) {
+      console.log('Error cargando cartas:', error);
+    }
+  };
+
   const abrirModalPerfil = () => {
     setTempNombre(usuario.nombre);
     setTempTitulo(usuario.titulo);
@@ -98,7 +136,6 @@ export default function ProfileScreen() {
       return;
     }
 
-    // Aqui iria la lógica del backend
     Alert.alert("¡Éxito!", "Contraseña actualizada correctamente.");
     setModalPasswordVisible(false);
     setPasswordActual('');
@@ -121,6 +158,9 @@ export default function ProfileScreen() {
     if (loaded || error) {
       SplashScreen.hideAsync();
     }
+
+    fetchProfile();
+    fetchCards();
   }, [loaded, error]);
 
   if (!loaded && !error) return null;
@@ -133,7 +173,6 @@ export default function ProfileScreen() {
     >
       <SafeAreaView style={styles.safeArea}>
         
-        {/* CABECERA */}
         <View style={styles.header}>
           <TouchableOpacity onPress={() => router.back()} style={{ padding: 5 }}>
             <Ionicons name="arrow-back" size={28} color="#FCEEB5" />
@@ -157,7 +196,6 @@ export default function ProfileScreen() {
           </View>
         </View>
 
-        {/* CONTENIDO PRINCIPAL */}
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           
           <View style={styles.panel}>
@@ -204,7 +242,6 @@ export default function ProfileScreen() {
           <View style={styles.panel}>
             <Text style={styles.sectionTitle}>Ajustes de Cuenta</Text>
             
-            {/* Botón Editar Perfil */}
             <TouchableOpacity style={styles.menuItem} onPress={abrirModalPerfil}>
               <View style={styles.menuItemLeft}>
                 <Ionicons name="person-outline" size={22} color="#2c3e50" />
@@ -215,7 +252,6 @@ export default function ProfileScreen() {
 
             <View style={styles.divider} />
 
-            {/* Botón Cambiar Contraseña */}
             <TouchableOpacity style={styles.menuItem} onPress={() => setModalPasswordVisible(true)}>
               <View style={styles.menuItemLeft}>
                 <Ionicons name="lock-closed-outline" size={22} color="#2c3e50" />
@@ -242,9 +278,6 @@ export default function ProfileScreen() {
 
         </ScrollView>
 
-        {/* ============================================== */}
-        {/* MODAL: EDITAR PERFIL                           */}
-        {/* ============================================== */}
         <Modal visible={modalPerfilVisible} transparent animationType="fade">
           <View style={styles.modalOverlay}>
             <View style={styles.formBox}>
@@ -280,9 +313,6 @@ export default function ProfileScreen() {
           </View>
         </Modal>
 
-        {/* ============================================== */}
-        {/* MODAL: CAMBIAR CONTRASEÑA                      */}
-        {/* ============================================== */}
         <Modal visible={modalPasswordVisible} transparent animationType="fade">
           <View style={styles.modalOverlay}>
             <View style={styles.formBox}>
@@ -380,7 +410,6 @@ const styles = StyleSheet.create({
   logoutButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#e5c9c5', paddingVertical: 16, borderRadius: 15, borderWidth: 1, borderColor: '#d2a6a1', marginTop: 10 },
   logoutButtonText: { color: '#c0392b', fontSize: 16, fontWeight: 'bold' },
 
-  // --- ESTILOS PARA LOS MODALES Y FORMULARIOS ---
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
   formBox: { width: '85%', backgroundColor: '#EEF2F5', padding: 25, borderRadius: 15, shadowColor: "#000", shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.3, shadowRadius: 5, elevation: 10 },
   modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#2c3e50', marginBottom: 20, textAlign: 'center' },
