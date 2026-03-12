@@ -18,7 +18,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 SplashScreen.preventAutoHideAsync();
 
-const API_URL = 'http://10.234.244.253:3000/api';
+const API_URL = 'http://10.1.65.221:3000/api';
 
 export default function MenuScreen() {
   const [loaded, error] = useFonts({
@@ -38,41 +38,58 @@ export default function MenuScreen() {
         return;
       }
 
-      const responseProfile = await fetch(`${API_URL}/users/profile`, {
+      // Generamos el timestamp para obligar a que nos de datos frescos
+      const timestamp = new Date().getTime();
+
+      const responseProfile = await fetch(`${API_URL}/users/profile?t=${timestamp}`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache'
         }
       });
 
       if (responseProfile.ok) {
         const dataProfile = await responseProfile.json();
+        
+        // Comprobamos todas las formas posibles en las que el backend nos puede mandar el nombre
         if (dataProfile.profile && dataProfile.profile.username) {
           setUsername(dataProfile.profile.username);
+        } else if (dataProfile.username) {
+          setUsername(dataProfile.username);
+        } else if (dataProfile.user && dataProfile.user.username) {
+          setUsername(dataProfile.user.username);
         } else {
           setUsername('Jugador');
         }
+      } else {
+        setUsername('Jugador');
       }
 
-      const responseBalance = await fetch(`${API_URL}/users/balance`, {
+      const responseBalance = await fetch(`${API_URL}/users/balance?t=${timestamp}`, {
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${token}`
+          'Authorization': `Bearer ${token}`,
+          'Cache-Control': 'no-cache'
         }
       });
 
       if (responseBalance.ok) {
         const dataBalance = await responseBalance.json();
-        if (typeof dataBalance.balance === 'number') {
+        if (dataBalance.balance && typeof dataBalance.balance.balance === 'number') {
+          setCoins(dataBalance.balance.balance);
+        } else if (typeof dataBalance.balance === 'number') {
           setCoins(dataBalance.balance);
+        } else if (typeof dataBalance.coins === 'number') {
+          setCoins(dataBalance.coins);
         } else {
           setCoins(0);
         }
       }
 
     } catch (error) {
-      console.error("Error cargando perfil:", error);
+      console.log(error);
       setUsername("Error");
     } finally {
       setIsLoadingProfile(false);

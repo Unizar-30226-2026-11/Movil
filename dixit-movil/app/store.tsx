@@ -7,7 +7,8 @@ import {
   SafeAreaView,
   ScrollView,
   Image,
-  Modal
+  Modal,
+  Alert
 } from 'react-native';
 import { useFonts } from 'expo-font';
 import { useEffect, useState } from 'react';
@@ -17,7 +18,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const API_URL = 'http://10.234.244.253:3000/api';
+const API_URL = 'http://10.1.65.221:3000/api';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -32,7 +33,6 @@ export default function StoreScreen() {
   const [productos, setProductos] = useState<any[]>([]);
   const [coins, setCoins] = useState(0);
 
-
   useEffect(() => {
     if (loaded || error) {
       SplashScreen.hideAsync();
@@ -44,21 +44,21 @@ export default function StoreScreen() {
   const fetchShopItems = async () => {
     try {
       const token = await AsyncStorage.getItem('userToken');
+      const timestamp = new Date().getTime(); // Truco anti-caché también para la tienda
 
-      const response = await fetch(`${API_URL}/shop/items`, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${token}`
+      const response = await fetch(`${API_URL}/shop/items?t=${timestamp}`, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Cache-Control': 'no-cache'
+        }
+      });
+
+      const data = await response.json();
+      
+      if (data.items) {
+        setProductos(data.items);
       }
-    });
-
-    const data = await response.json();
-
-    console.log("SHOP ITEMS:", data);
-
-    if (data.items) {
-      setProductos(data.items);
-    }
 
     } catch (error) {
       console.log("Error cargando tienda:", error);
@@ -73,6 +73,13 @@ export default function StoreScreen() {
   };
 
   const comprarProducto = async () => {
+    // PROTECCIÓN FRONTEND: Comprobamos si el precio es mayor que las monedas que tenemos
+    if (productoSeleccionado.price > coins) {
+      Alert.alert("Saldo insuficiente", "No tienes suficientes monedas para comprar este artículo.");
+      setModalCompraVisible(false);
+      return; 
+    }
+
     try {
       const token = await AsyncStorage.getItem("userToken");
 
@@ -89,17 +96,18 @@ export default function StoreScreen() {
 
       const data = await response.json();
 
-      console.log("BUY RESPONSE:", data);
-
       if (response.ok) {
-        await fetchBalance();
-        alert("Compra realizada");
+        // Refrescamos el balance para ver el nuevo saldo inmediatamente
+        await fetchBalance(); 
+        Alert.alert("¡Enhorabuena!", "Compra realizada con éxito.");
       } else {
-        alert(data.message || "No se pudo comprar");
+        Alert.alert("Error", data.message || "No se pudo completar la compra.");
       }
 
     } catch (error) {
-      console.log(error);
+      console.log("Fallo al procesar la compra", error);
+    } finally {
+       setModalCompraVisible(false); // Cerramos el modal pase lo que pase
     }
   };
 
@@ -109,24 +117,31 @@ export default function StoreScreen() {
       const token = await AsyncStorage.getItem('userToken');
       if (!token) return;
 
-      const response = await fetch(`${API_URL}/users/balance`, {
+      const timestamp = new Date().getTime(); // Nuestro querido Cache Buster
+
+      const response = await fetch(`${API_URL}/users/balance?t=${timestamp}`, {
         method: 'GET',
         headers: {
-          Authorization: `Bearer ${token}`
+          Authorization: `Bearer ${token}`,
+          'Cache-Control': 'no-cache'
         }
       });
 
       const data = await response.json();
 
-      console.log("BALANCE:", data);
-
-      if (typeof data.balance === 'number') {
+      // Mismo apaño que en menu.tsx para leer bien el JSON anidado
+      if (data.balance && typeof data.balance.balance === 'number') {
+        setCoins(data.balance.balance);
+      } else if (typeof data.balance === 'number') {
         setCoins(data.balance);
       } else if (typeof data.coins === 'number') {
         setCoins(data.coins);
+      } else {
+        setCoins(0);
       }
+
     } catch (error) {
-      console.log("Error cargando balance:", error);
+      console.log("Error al refrescar las monedas:", error);
     }
   };
 
@@ -235,7 +250,7 @@ export default function StoreScreen() {
           <View style={styles.modalOverlay}>
             <View style={styles.confirmBox}>
               <Text style={styles.confirmText}>
-                ¿Estás seguro de que quieres comprar este mazo?
+                ¿Estás seguro de que quieres comprar este artículo?
               </Text>
 
               <View style={styles.confirmButtons}>
@@ -248,10 +263,7 @@ export default function StoreScreen() {
 
                 <TouchableOpacity
                   style={styles.yesButton}
-                  onPress={() => {
-                    setModalCompraVisible(false);
-                    comprarProducto();
-                  }}
+                  onPress={() => comprarProducto()}
                 >
                   <Text style={styles.confirmButtonText}>Sí</Text>
                 </TouchableOpacity>
