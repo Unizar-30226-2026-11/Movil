@@ -15,16 +15,26 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 SplashScreen.preventAutoHideAsync();
 
-const API_URL = 'http://172.20.10.7:3000/api'; 
-
-const MODES_CONFIG: Record<string, { label: string; icon: keyof typeof Ionicons.glyphMap; color: string; }> = {
-  classic: { label: 'DIXIT CLÁSICO', icon: 'color-wand-outline', color: '#FCEEB5' },
-  stella: { label: 'STELLA', icon: 'sparkles-outline', color: '#a29bfe' },
-};
+const API_URL = 'http://192.168.1.133:3000/api'; 
 
 export default function MainScreen() {
-  const { mode } = useLocalSearchParams<{ mode?: string }>();
-  const currentMode = (mode && MODES_CONFIG[mode]) || { label: 'MODO DESCONOCIDO', icon: 'help-circle-outline', color: '#FCEEB5' };
+  const {
+    lobbyCode,
+    lobbyName,
+    engine,
+    maxPlayers,
+    currentPlayers,
+    isPrivate,
+    status
+  } = useLocalSearchParams<{
+    lobbyCode?: string;
+    lobbyName?: string;
+    engine?: string;
+    maxPlayers?: string;
+    currentPlayers?: string;
+    isPrivate?: string;
+    status?: string;
+  }>();
   const router = useRouter();
   const [loaded, error] = useFonts({
     'FuenteTitulo': require('../assets/fonts/fuente-dilana.ttf'), 
@@ -35,7 +45,7 @@ export default function MainScreen() {
   const [mazoSeleccionado, setMazoSeleccionado] = useState('Selección Mazo');
   const [modalVisible, setModalVisible] = useState(false);
   const [tipoModal, setTipoModal] = useState(''); 
-  const [buscando, setBuscando] = useState(false);
+//  const [buscando, setBuscando] = useState(false);
   
   const [socialVisible, setSocialVisible] = useState(false);
   const [verPeticiones, setVerPeticiones] = useState(false); 
@@ -52,15 +62,19 @@ export default function MainScreen() {
   const [textoMensaje, setTextoMensaje] = useState('');
   const [modalAñadirVisible, setModalAñadirVisible] = useState(false);
   const [nuevoAmigoNombre, setNuevoAmigoNombre] = useState('');
+
+  const [joinedLocally, setJoinedLocally] = useState(false);
   
   const [cartas, setCartas] = useState<any[]>([]);
 
-  // Lógica de Lobbies (¡lo nuevo!)
   const [salaActual, setSalaActual] = useState<any>(null);
-  const [salasPublicas, setSalasPublicas] = useState<any[]>([]);
-  const [modalSalasVisible, setModalSalasVisible] = useState(false);
+//  const [salasPublicas, setSalasPublicas] = useState<any[]>([]);
+//  const [modalSalasVisible, setModalSalasVisible] = useState(false);
   const [modalUnirseVisible, setModalUnirseVisible] = useState(false);
   const [codigoIngresado, setCodigoIngresado] = useState('');
+  const [currentUserId, setCurrentUserId] = useState('');
+//  const [previewVisible, setPreviewVisible] = useState(false);
+  const [isLoadingLobby, setIsLoadingLobby] = useState(false);
 
   const opcionesMapa = ['El Bosque de los Susurros', 'Ciudad Espejismo', 'Ruinas del Tiempo', 'Aleatorio'];
   const opcionesMazo = ['Colección Surrealista', 'Colección Sketch', 'Colección Acuarela', 'Todos mezclados'];
@@ -197,12 +211,73 @@ export default function MainScreen() {
     }
   };
 
-  // Pillo la lista de salas públicas del servidor para el buscador
-  const cargarSalasPublicas = async () => {
+  const fetchCurrentUser = async () => {
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      if (!token) return;
+
+      const response = await fetch(`${API_URL}/users/profile`, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.profile?.id) {
+        setCurrentUserId(data.profile.id);
+      }
+    } catch (error) {
+      console.log('Error cargando usuario actual:', error);
+    }
+  };
+
+  const fetchLobbyDetails = async (code: string) => {
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      if (!token || !code) return;
+
+      setIsLoadingLobby(true);
+
+      const response = await fetch(`${API_URL}/lobbies/${code}`, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+
+      const data = await response.json();
+
+      console.log('LOBBY DETAILS:', JSON.stringify(data, null, 2));
+
+      if (!response.ok) {
+        setSalaActual(null);
+        return;
+      }
+
+      if (data.lobby) {
+        setSalaActual(data.lobby);
+      } else if (data.room) {
+        setSalaActual(data.room);
+      } else if (data.name || data.lobbyCode || data.hostId) {
+        setSalaActual(data);
+      } else {
+        setSalaActual(null);
+      }
+    } catch (error) {
+      console.log('Error cargando detalles de sala:', error);
+      setSalaActual(null);
+    } finally {
+      setIsLoadingLobby(false);
+    }
+  };
+
+/*  const cargarSalasPublicas = async () => {
     setBuscando(true);
     try {
       const token = await AsyncStorage.getItem('userToken');
-      const timestamp = new Date().getTime(); // Anti-caché
+      const timestamp = new Date().getTime();
 
       const response = await fetch(`${API_URL}/lobbies?t=${timestamp}`, {
         method: 'GET',
@@ -222,17 +297,12 @@ export default function MainScreen() {
     } finally {
       setBuscando(false);
     }
-  };
+  };*/
 
-  // Creo mi propia sala en el backend
 const crearSala = async () => {
     try {
-      // pillo el token de la sesion
       const token = await AsyncStorage.getItem('userToken');
-      
-      // el router me pasa 'classic' o 'stella', pero el back los quiere con mayuscula inicial
-      const motorElegido = mode === 'stella' ? 'Stella' : 'Classic';
-
+      const motorElegido = 'Classic';
       const response = await fetch(`${API_URL}/lobbies`, {
         method: 'POST',
         headers: { 
@@ -252,7 +322,6 @@ const crearSala = async () => {
       if (response.ok && data.lobby) {
         setSalaActual(data.lobby);
       } else {
-        // chivato para ver que rompe
         console.log("Fallo del backend al crear sala:", data);
         Alert.alert("Fallo del servidor", data.message || "Datos incorrectos (Error 400)");
       }
@@ -261,7 +330,6 @@ const crearSala = async () => {
     }
   };
 
-  // Intento unirme a una sala usando el código que he metido a mano (o clickando en la lista)
   const unirseASala = async (codigo: string) => {
     if (!codigo.trim()) return;
 
@@ -278,7 +346,7 @@ const crearSala = async () => {
 
       if (response.ok && data.lobby) {
         setSalaActual(data.lobby);
-        setModalSalasVisible(false);
+        setJoinedLocally(true);
         setModalUnirseVisible(false);
         setCodigoIngresado('');
         Alert.alert("¡Dentro!", "Te has unido a la sala.");
@@ -290,12 +358,36 @@ const crearSala = async () => {
     }
   };
 
+  const handleJoinLobby = async () => {
+    if (!salaVisible) return;
+
+    if (salaVisible.isPrivate) {
+      setModalUnirseVisible(true);
+      return;
+    }
+
+    setJoinedLocally(true);
+  };
+
   useEffect(() => {
     if (loaded || error) SplashScreen.hideAsync();
     fetchAmigos();
     fetchSolicitudes();
     fetchCartas();
+    fetchCurrentUser();
   }, [loaded, error]);
+
+  useEffect(() => {
+    console.log('PARAMS MAIN:', { lobbyCode, lobbyName, engine, maxPlayers, currentPlayers, isPrivate, status });
+    console.log('LOBBY CODE EN MAIN:', lobbyCode);
+
+    if (lobbyCode) {
+      fetchLobbyDetails(String(lobbyCode));
+    } else {
+      setSalaActual(null);
+      setIsLoadingLobby(false);
+    }
+  }, [lobbyCode, lobbyName, engine, maxPlayers, currentPlayers, isPrivate, status]);
 
   if (!loaded && !error) return null;
 
@@ -325,6 +417,18 @@ const crearSala = async () => {
   const amigosOnline = amigosFiltrados.filter(a => a.estado === 'online');
   const amigosOffline = amigosFiltrados.filter(a => a.estado !== 'online');
 
+  const salaVisible = salaActual || (lobbyCode ? {
+    lobbyCode,
+    name: lobbyName || 'Sala',
+    engine: engine || 'Classic',
+    maxPlayers: Number(maxPlayers || 4),
+    status: status || 'waiting',
+    players: []
+  } : null);  
+  const jugadoresSala = salaVisible?.players || [];
+  const isHost = salaVisible?.hostId === currentUserId;
+  const isJoined = jugadoresSala.includes(currentUserId) || joinedLocally;
+
   return (
     <ImageBackground source={require('../assets/images/background.jpg')} style={styles.background} resizeMode="cover">
       <SafeAreaView style={styles.safeArea}>
@@ -346,11 +450,7 @@ const crearSala = async () => {
         </View>
 
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-          <View style={[styles.modeBanner, { borderColor: currentMode.color }]}>
-            <Ionicons name={currentMode.icon} size={16} color={currentMode.color} />
-            <Text style={[styles.modeBannerText, { color: currentMode.color }]}>{currentMode.label}</Text>
-          </View>
-          
+
           <TouchableOpacity style={styles.accordionButton} activeOpacity={0.8} onPress={() => setCartasDesplegadas(!cartasDesplegadas)}>
             <Text style={styles.accordionText}>
               Mis Cartas ({cartas.reduce((acc, carta) => acc + (carta.quantity || 1), 0)}/256)
@@ -391,70 +491,96 @@ const crearSala = async () => {
             </View>
           </View>
 
-          {/* EL PANEL DE LA SALA REFORMADO */}
           <View style={styles.panel}>
             <View style={styles.panelHeader}>
-              <Text style={styles.panelTitle}>{salaActual ? `Sala: ${salaActual.name}` : 'Sala actual:'}</Text>
-              {salaActual && (
+              <Text style={styles.panelTitle}>
+                {salaActual ? 'Sala actual:' : 'Sala actual:'}
+              </Text>
+              {salaVisible && (
                 <View style={styles.playerCountBadge}>
-                  <Text style={styles.playerCountText}>{salaActual.players?.length || 1}/{salaActual.maxPlayers || 8}</Text>
+                  <Text style={styles.playerCountText}>
+                    {jugadoresSala.length}/{salaVisible.maxPlayers || 4}
+                  </Text>
                 </View>
               )}
             </View>
 
-            {salaActual ? (
-              <>
-                <View style={styles.codeContainer}>
+            {isLoadingLobby ? (
+              <ActivityIndicator color="#2c3e50" />
+            ) : salaVisible ? (
+              <><View style={styles.codeContainer}>
                   <Text style={styles.codeLabel}>CÓDIGO DE SALA</Text>
-                  <Text style={styles.codeText}>{salaActual.lobbyCode}</Text>
+                  <Text style={styles.codeText}>{salaVisible.lobbyCode || lobbyCode}</Text>
                 </View>
-
-                <View style={styles.playerRow}>
-                  <View style={styles.playerInfo}>
-                    <View style={[styles.statusDot, {backgroundColor: '#2ecc71'}]} /><Text style={styles.playerName}>Tú</Text>
+                {jugadoresSala.map((playerId: string, index: number) => (
+                  <View key={`${playerId}-${index}`} style={styles.playerRow}>
+                    <View style={styles.playerInfo}>
+                      <View style={[styles.statusDot, { backgroundColor: index === 0 ? '#2ecc71' : '#95a5a6' }]} />
+                      <Text style={styles.playerName}>{playerId}</Text>
+                    </View>
+                    <Text style={styles.playerRoleText}>
+                      {playerId === salaVisible.hostId ? 'anfitrión' : 'jugador'}
+                    </Text>
                   </View>
-                </View>
+                ))}
 
-                {salaActual.players && salaActual.players.length < salaActual.maxPlayers && (
-                  <View style={[styles.playerRow, styles.emptyPlayerRow]}>
-                    <Text style={styles.emptyPlayerText}>Esperando jugadores...</Text>
+                {Array.from({ length: Math.max((salaVisible.maxPlayers || 4) - jugadoresSala.length, 0) }).map((_, index) => (
+                  <View key={`empty-${index}`} style={[styles.playerRow, styles.emptyPlayerSlot]}>
+                    <Text style={styles.emptySlotText}>slot libre</Text>
+                    <Text style={styles.emptySlotStatus}>abierto</Text>
                   </View>
-                )}
-
-                <TouchableOpacity style={styles.inviteButton} onPress={() => setSalaActual(null)}>
-                  <Ionicons name="exit-outline" size={18} color="#2c3e50" />
-                  <Text style={styles.inviteButtonText}>Salir de la sala</Text>
-                </TouchableOpacity>
+                ))}
               </>
             ) : (
-              <>
-                <Text style={styles.emptyPlayerText}>No estás en ninguna sala ahora mismo.</Text>
-                <View style={{flexDirection: 'row', gap: 10, marginTop: 15}}>
-                  <TouchableOpacity style={[styles.inviteButton, {flex: 1, marginTop: 0}]} onPress={crearSala}>
-                    <Ionicons name="add-circle-outline" size={18} color="#2c3e50" />
-                    <Text style={styles.inviteButtonText}>Crear</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[styles.inviteButton, {flex: 1, marginTop: 0}]} onPress={() => setModalUnirseVisible(true)}>
-                    <Ionicons name="enter-outline" size={18} color="#2c3e50" />
-                    <Text style={styles.inviteButtonText}>Unirse</Text>
-                  </TouchableOpacity>
-                </View>
-              </>
+              <Text style={styles.emptyPlayerText}>No estás en ninguna sala ahora mismo.</Text>
             )}
           </View>
 
           <View style={styles.matchmakingContainer}>
-            <TouchableOpacity style={styles.dropdownButton} onPress={() => abrirModal('mapa')}><Text style={styles.dropdownText}>{mapaSeleccionado}</Text><Ionicons name="chevron-down" size={20} color="#2c3e50" /></TouchableOpacity>
-            <TouchableOpacity style={styles.dropdownButton} onPress={() => abrirModal('mazo')}><Text style={styles.dropdownText}>{mazoSeleccionado}</Text><Ionicons name="chevron-down" size={20} color="#2c3e50" /></TouchableOpacity>
-            
-            {/* ESTE ES EL BUSCADOR DE SALAS PÚBLICAS */}
-            <TouchableOpacity style={[styles.searchButton, buscando && styles.searchButtonActive]} onPress={cargarSalasPublicas} disabled={buscando}>
-              {buscando ? (
-                <View style={styles.searchingRow}><ActivityIndicator size="small" color="#ffffff" /><Text style={styles.searchButtonTextActive}>Buscando...</Text></View>
-              ) : <Text style={styles.searchButtonText}>Buscar partidas públicas</Text>}
+            <TouchableOpacity style={styles.dropdownButton} onPress={() => abrirModal('mapa')}>
+              <Text style={styles.dropdownText}>{mapaSeleccionado}</Text>
+              <Ionicons name="chevron-down" size={20} color="#2c3e50" />
             </TouchableOpacity>
+
+            <TouchableOpacity style={styles.dropdownButton} onPress={() => abrirModal('mazo')}>
+              <Text style={styles.dropdownText}>{mazoSeleccionado}</Text>
+              <Ionicons name="chevron-down" size={20} color="#2c3e50" />
+            </TouchableOpacity>
+
+            {salaVisible ? (
+              isJoined ? (
+                <TouchableOpacity style={styles.readyButton}>
+                  <Text style={styles.readyButtonText}>
+                    {isHost ? 'Empezar partida' : 'Listo'}
+                  </Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity style={styles.readyButton} onPress={handleJoinLobby}>
+                  <Text style={styles.readyButtonText}>Unirme a la sala</Text>
+                </TouchableOpacity>
+              )
+            ) : (
+              <View style={styles.searchButton}>
+                <Text style={styles.searchButtonText}>Cargando sala...</Text>
+              </View>
+            )}
           </View>
         </ScrollView>
+
+        <Modal visible={!!salaVisible && !isJoined} transparent animationType="fade">
+          <View style={styles.previewOverlay}>
+            <View style={styles.previewBox}>
+              <Text style={styles.previewLabel}>LOBBY EN VISTA PREVIA</Text>
+              <Text style={styles.previewTitle}>Únete para abrir la conexión realtime</Text>
+              <Text style={styles.previewText}>
+                Puedes ver la sala, pero las acciones del lobby y la partida solo se activan al unirte.
+              </Text>
+              <TouchableOpacity style={styles.previewJoinButton} onPress={handleJoinLobby}>
+                <Text style={styles.previewJoinText}>Unirme a la sala</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
 
         <Modal animationType="fade" transparent={true} visible={modalVisible} onRequestClose={() => setModalVisible(false)}>
           <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setModalVisible(false)}>
@@ -467,8 +593,7 @@ const crearSala = async () => {
           </TouchableOpacity>
         </Modal>
 
-        {/* MODAL PARA VER SALAS PÚBLICAS Y UNIRSE */}
-        <Modal visible={modalSalasVisible} transparent animationType="slide">
+{/*        <Modal visible={modalSalasVisible} transparent animationType="slide">
           <View style={styles.formModalOverlay}>
             <View style={[styles.formBox, {maxHeight: '80%'}]}>
               <Text style={styles.formModalTitle}>Salas Disponibles</Text>
@@ -497,9 +622,8 @@ const crearSala = async () => {
               </TouchableOpacity>
             </View>
           </View>
-        </Modal>
+        </Modal>*/}
 
-        {/* MODAL PARA METER EL CÓDIGO A MANO */}
         <Modal visible={modalUnirseVisible} transparent animationType="fade">
           <View style={styles.formModalOverlay}>
             <View style={styles.formBox}>
@@ -664,8 +788,6 @@ const styles = StyleSheet.create({
   friendActivity: { color: '#8caea6', fontSize: 12 },
   addFriendButton: { backgroundColor: '#A8C8C0', margin: 20, paddingVertical: 15, borderRadius: 30, alignItems: 'center' },
   addFriendButtonText: { fontSize: 18, fontWeight: 'bold', color: '#2c3e50' },
-  modeBanner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: 'rgba(10, 25, 40, 0.85)', borderWidth: 1, paddingVertical: 8, borderRadius: 20, alignSelf: 'center', paddingHorizontal: 20 },
-  modeBannerText: { fontWeight: 'bold', fontSize: 13 },
   formModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
   formBox: { width: '85%', backgroundColor: '#EEF2F5', padding: 25, borderRadius: 15 },
   formModalTitle: { fontSize: 18, fontWeight: 'bold', color: '#2c3e50', marginBottom: 20, textAlign: 'center' },
@@ -675,7 +797,6 @@ const styles = StyleSheet.create({
   formSaveButton: { backgroundColor: '#A8C8C0', padding: 12, borderRadius: 10, width: '48%', alignItems: 'center' },
   formButtonText: { color: 'white', fontWeight: 'bold' },
   
-  // Novedades para el panel del Lobby
   codeContainer: { backgroundColor: '#2c3e50', padding: 15, borderRadius: 10, alignItems: 'center', marginBottom: 15 },
   codeLabel: { color: '#8caea6', fontSize: 12, fontWeight: 'bold', marginBottom: 5, letterSpacing: 1 },
   codeText: { color: '#FCEEB5', fontSize: 32, fontWeight: 'bold', letterSpacing: 6 },
@@ -684,4 +805,18 @@ const styles = StyleSheet.create({
   lobbyDetails: { fontSize: 13, color: '#555', marginTop: 4 },
   lobbyPlayersBadge: { backgroundColor: '#2c3e50', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
   lobbyPlayersText: { color: '#FCEEB5', fontWeight: 'bold' },
+
+  playerRoleText: { fontSize: 13, color: '#555', fontWeight: '600' },
+  emptyPlayerSlot: { backgroundColor: '#d9d9d9' },
+  emptySlotText: { color: '#2c3e50', fontWeight: '600' },
+  emptySlotStatus: { color: '#555', fontSize: 13 },
+  readyButton: { backgroundColor: '#cfe7c6', paddingVertical: 18, borderRadius: 18, alignItems: 'center', justifyContent: 'center', elevation: 6 },
+  readyButtonText: { fontSize: 20, fontWeight: 'bold', color: '#2c3e50' },
+  previewOverlay: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', alignItems: 'center', zIndex: 30 },
+  previewBox: { width: '78%', backgroundColor: '#EEF2F5', borderRadius: 20, padding: 24, alignItems: 'center' },
+  previewLabel: { fontSize: 11, fontWeight: 'bold', color: '#555', letterSpacing: 2, marginBottom: 14 },
+  previewTitle: { fontSize: 26, fontWeight: 'bold', color: '#2c3e50', textAlign: 'center', marginBottom: 12 },
+  previewText: { fontSize: 14, color: '#555', textAlign: 'center', marginBottom: 18 },
+  previewJoinButton: { backgroundColor: '#cfe7c6', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 16 },
+  previewJoinText: { color: '#2c3e50', fontWeight: 'bold', fontSize: 18 },
 });
