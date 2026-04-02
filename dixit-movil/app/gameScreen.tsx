@@ -5,207 +5,372 @@ import {
   TouchableOpacity,
   Image,
   SafeAreaView,
-  TextInput,
-  Modal,
+  ScrollView,
   Dimensions,
   ImageBackground,
+  Animated,
+  Easing
 } from 'react-native';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
-import Svg, { Text as SvgText } from 'react-native-svg';
 import { useRouter } from 'expo-router';
 
 SplashScreen.preventAutoHideAsync();
 
-const { width, height } = Dimensions.get('window');
+const { width } = Dimensions.get('window');
 
-type CardData = { id: string; image: string };
-
-type CardProps = {
-  card: CardData;
-  selected: boolean;
-  cardWidth: number;
-  onSelect: () => void;
-  onConfirm: () => void;
-  showConfirm: boolean;
-};
-
-function Card({ card, selected, cardWidth, onSelect, onConfirm, showConfirm }: CardProps) {
+// lo separo aqui para que el codigo del render no quede infumable
+function Card({ image, selected, isVoting, onSelect }) {
   return (
-    <View style={[styles.cardWrapper, { width: cardWidth }]}>
+    <View style={styles.cardWrapper}>
       <TouchableOpacity
         activeOpacity={0.9}
         onPress={onSelect}
         style={[
           styles.card,
-          { width: cardWidth },
           selected && styles.cardSelected,
+          isVoting && selected && styles.cardSelectedVoting
         ]}
       >
-        <Image source={{ uri: card.image }} style={styles.cardImage} />
+        <Image source={{ uri: image }} style={styles.cardImage} />
       </TouchableOpacity>
-
-      {selected && showConfirm && (
-        <TouchableOpacity style={styles.chooseButton} onPress={onConfirm}>
-          <Text style={styles.chooseText}>Elegir</Text>
-        </TouchableOpacity>
-      )}
     </View>
+  );
+}
+
+// este es el topito de los jugadores, le meto su propio animated value para que salte suave
+function FichaJugador({ jugador, size = 12 }) {
+  const animValue = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    // reseteo y pego el bote cuando el pavo gana puntos
+    animValue.setValue(0);
+    Animated.timing(animValue, {
+      toValue: 1,
+      duration: 600,
+      easing: Easing.out(Easing.back(1.5)),
+      useNativeDriver: true,
+    }).start();
+  }, [jugador.puntos]);
+
+  return (
+    <Animated.View 
+      style={[
+        styles.fichaJugador, 
+        { 
+          backgroundColor: jugador.color,
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          transform: [
+            { scale: animValue.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 1.4, 1] }) }
+          ]
+        }
+      ]} 
+    />
   );
 }
 
 export default function GameScreen() {
   const router = useRouter();
 
-  const [selectedCard, setSelectedCard] = useState<string | null>(null);
-  const [isNarrator, setIsNarrator] = useState(false);
-  const [phrase, setPhrase] = useState('');
-  const [mapExpanded, setMapExpanded] = useState(false);
+  // me monto todos los estados de la movida para ir jugando con los cambios de pantalla
+  const [fasePartida, setFasePartida] = useState('elegir'); 
+  const [cartaJugadaPropia, setCartaJugadaPropia] = useState<string | null>(null);
+  const [cartaVotada, setCartaVotada] = useState<string | null>(null);
+  const [accionConfirmada, setAccionConfirmada] = useState(false);
+  const [tableroDesplegado, setTableroDesplegado] = useState(false); 
+  const [estadoBots, setEstadoBots] = useState(0); 
+  
+  // la frase por defecto para la primera ronda
+  const [fraseActual, setFraseActual] = useState('Una mirada perdida.');
+
+  // unas cuantas frases falsas para ir tirando y probar que cambia
+  const pistasMock = [
+    'Una mirada perdida.',
+    'El último tren a ninguna parte.',
+    'Un silencio ensordecedor.',
+    'El peso de la corona.',
+    'Caída libre sin paracaídas.',
+    'Un reflejo engañoso.',
+    'Buscando a Nemo pero mal.'
+  ];
 
   const [loaded, error] = useFonts({
     FuenteTitulo: require('../assets/fonts/fuente-dilana.ttf'),
   });
 
+  const [jugadores, setJugadores] = useState([
+    { id: 'u1', nombre: 'hackeeper', color: '#e67e22', yo: true, puntos: 1 },
+    { id: 'u2', nombre: 'Azzal-e', color: '#2ecc71', yo: false, puntos: 1 },
+    { id: 'u3', nombre: 'Natur4', color: '#3498db', yo: false, puntos: 1 },
+    { id: 'u4', nombre: 'Stella', color: '#9b59b6', yo: false, puntos: 1 },
+  ]);
+
+  const misCartas = [
+    { id: 'c1', image: 'https://picsum.photos/300/400?10' },
+    { id: 'c2', image: 'https://picsum.photos/300/400?11' },
+    { id: 'c3', image: 'https://picsum.photos/300/400?12' },
+    { id: 'c4', image: 'https://picsum.photos/300/400?13' },
+  ];
+
+  const cartasVotacion = [
+    { id: 'v1', image: 'https://picsum.photos/300/400?14' },
+    { id: 'v2', image: 'https://picsum.photos/300/400?15' },
+    { id: 'v3', image: 'https://picsum.photos/300/400?16' },
+    { id: 'v4', image: 'https://picsum.photos/300/400?17' },
+  ];
+
+  const casillasTablero = Array.from({ length: 42 }).map((_, i) => ({
+    numero: i + 1,
+    tipo: i % 5 === 0 ? 'gema' : 'normal',
+    color: i % 5 === 0 ? '#d988b3' : '#e0e6ed'
+  }));
+
   useEffect(() => {
     if (loaded || error) SplashScreen.hideAsync();
   }, [loaded, error]);
 
-  if (!loaded && !error) return null;
+  const handleJugarCarta = () => {
+    if (!cartaJugadaPropia) return;
+    setAccionConfirmada(true);
+    setEstadoBots(1);
 
-  const cards: CardData[] = useMemo(
-    () => [
-      { id: '1', image: 'https://picsum.photos/300/400?1' },
-      { id: '2', image: 'https://picsum.photos/300/400?2' },
-      { id: '3', image: 'https://picsum.photos/300/400?3' },
-      { id: '4', image: 'https://picsum.photos/300/400?4' },
-      { id: '5', image: 'https://picsum.photos/300/400?5' },
-    ],
-    []
-  );
-
-  const bottomRow = cards.slice(0, 3);
-  const topRow = cards.slice(3, 5);
-
-  const cardWidth = Math.floor((width - 40 - 2 * 12) / 3);
-
-  const handleConfirm = () => {
-    if (!selectedCard) return;
-    if (isNarrator) console.log(selectedCard, phrase);
-    else console.log(selectedCard);
+    setTimeout(() => setEstadoBots(2), 1000);
+    setTimeout(() => setEstadoBots(3), 2000);
+    setTimeout(() => {
+      setEstadoBots(0);
+      setAccionConfirmada(false);
+      setFasePartida('votacion');
+    }, 3000);
   };
 
+  const handleVotarCarta = () => {
+    if (!cartaVotada) return;
+    setAccionConfirmada(true);
+    setEstadoBots(1);
+    setFasePartida('puntuacion'); 
+    
+    setTimeout(() => setEstadoBots(2), 1000);
+    setTimeout(() => setEstadoBots(3), 2500);
+    
+    setTimeout(() => {
+      setEstadoBots(4); 
+      setTableroDesplegado(true); 
+      
+      setTimeout(() => {
+        setJugadores(prev => 
+          prev.map(j => ({
+            ...j,
+            puntos: Math.min(42, j.puntos + Math.floor(Math.random() * 6) + 1)
+          }))
+        );
+        
+        // dejo todo limpito para la ronda 2
+        setTimeout(() => {
+            const pistaRandom = pistasMock[Math.floor(Math.random() * pistasMock.length)];
+            setFraseActual(pistaRandom); // le pego el cambiazo a la pista aqui
+
+            setFasePartida('elegir');
+            setCartaJugadaPropia(null);
+            setCartaVotada(null);
+            setAccionConfirmada(false);
+            setEstadoBots(0);
+        }, 4000);
+
+      }, 1000);
+    }, 3500);
+  };
+
+  if (!loaded && !error) return null;
+
   return (
-    <ImageBackground
-      source={require('../assets/images/background.jpg')}
-      style={styles.background}
-      resizeMode="cover"
-    >
+    <ImageBackground source={require('../assets/images/background.jpg')} style={styles.background} resizeMode="cover">
       <SafeAreaView style={styles.safeArea}>
 
         <View style={styles.header}>
-          <View style={styles.headerTitleContainer}>
-            <Svg height="100%" width="100%" viewBox="0 0 300 50">
-              <SvgText
-                fill="black"
-                stroke="#FCEEB5"
-                strokeWidth="0.8"
-                fontSize="28"
-                fontFamily="FuenteTitulo"
-                x="0"
-                y="35"
-              >
-                A Tale Of Recognition
-              </SvgText>
-            </Svg>
+          <TouchableOpacity style={styles.headerButton} onPress={() => router.back()}>
+            <Text style={styles.headerButtonText}>Home</Text>
+          </TouchableOpacity>
+
+          <View style={styles.fasePill}>
+            <Text style={styles.fasePillText}>SALA 1</Text>
           </View>
 
-          <View style={styles.headerIcons}>
-            <TouchableOpacity style={{ padding: 5 }} onPress={() => router.push('/store')}>
-              <Ionicons name="cart-outline" size={26} color="#FCEEB5" />
-            </TouchableOpacity>
-            <TouchableOpacity style={{ padding: 5 }} onPress={() => router.push('/setting')}>
-              <Ionicons name="settings-outline" size={26} color="#FCEEB5" />
-            </TouchableOpacity>
-          </View>
+          <View style={{ width: 60 }} />
         </View>
 
-        <View style={styles.gameContent}>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
 
-          <View style={styles.topSection}>
-            {!isNarrator ? (
-              <Text style={styles.phraseText}>Donde nacen las sombras</Text>
-            ) : (
-              selectedCard && (
-                <View style={styles.narratorContainer}>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Escribe tu frase..."
-                    placeholderTextColor="#6b6b6b"
-                    value={phrase}
-                    onChangeText={setPhrase}
-                  />
-                  <TouchableOpacity style={styles.confirmButton} onPress={handleConfirm}>
-                    <Text style={styles.confirmText}>Confirmar</Text>
+          <View style={styles.panelGlass}>
+            <Text style={styles.faseLabel}>
+              {fasePartida === 'elegir' ? 'PISTA ACTUAL' : fasePartida === 'votacion' ? 'VOTACIÓN' : 'PUNTUACIÓN'}
+            </Text>
+            
+            <Text style={styles.phraseText}>{fraseActual}</Text>
+            
+            {fasePartida === 'elegir' && (
+              <View style={styles.elegirContainer}>
+                {!accionConfirmada ? (
+                   <>
+                    <Text style={styles.instruccionText}>Elige una carta de tu mano y colócala en la mesa.</Text>
+                    <View style={styles.cartaPlaceholder}>
+                      {cartaJugadaPropia ? (
+                        <Image source={{ uri: misCartas.find(c => c.id === cartaJugadaPropia)?.image }} style={styles.cartaPlaceholderImg} />
+                      ) : (
+                        <Text style={styles.placeholderText}>Toca una carta de abajo.</Text>
+                      )}
+                    </View>
+                    <TouchableOpacity 
+                      style={[styles.botonAccion, {marginTop: 20}, !cartaJugadaPropia && {opacity: 0.5}]} 
+                      onPress={handleJugarCarta}
+                      disabled={!cartaJugadaPropia}
+                    >
+                      <Text style={styles.botonAccionText}>Confirmar Carta</Text>
+                    </TouchableOpacity>
+                   </>
+                ) : (
+                    <View style={styles.puntuacionContainer}>
+                        <Text style={styles.instruccionText}>Esperando a que el resto elija sus cartas...</Text>
+                        <View style={styles.progressBarContainer}>
+                            <Text style={styles.progressText}>{estadoBots + 1} / 4 jugadores listos.</Text>
+                            <View style={styles.progressBarBg}>
+                                <View style={[styles.progressBarFill, {width: `${((estadoBots + 1) / 4) * 100}%`}]} />
+                            </View>
+                        </View>
+                    </View>
+                )}
+              </View>
+            )}
+
+            {fasePartida === 'votacion' && (
+              <View style={styles.votacionContainer}>
+                <Text style={styles.instruccionText}>Has elegido {cartaVotada || 'ninguna'}.</Text>
+                
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.votacionScroll}>
+                  {cartasVotacion.map((c) => (
+                    <Card 
+                      key={c.id} 
+                      image={c.image} 
+                      selected={cartaVotada === c.id} 
+                      isVoting={true}
+                      onSelect={() => !accionConfirmada && setCartaVotada(c.id)} 
+                    />
+                  ))}
+                </ScrollView>
+
+                <View style={styles.votacionFooter}>
+                  <Text style={styles.instruccionText}>Tu voto actual es {cartaVotada || 'ninguno'}.</Text>
+                  <TouchableOpacity 
+                    style={[styles.botonAccion, accionConfirmada && styles.botonAccionDisabled]} 
+                    onPress={handleVotarCarta}
+                    disabled={accionConfirmada || !cartaVotada}
+                  >
+                    <Text style={[styles.botonAccionText, (!cartaVotada) && {color: '#888'}]}>
+                      {accionConfirmada ? 'Voto enviado' : 'Confirmar voto'}
+                    </Text>
                   </TouchableOpacity>
                 </View>
-              )
+              </View>
+            )}
+
+            {fasePartida === 'puntuacion' && (
+              <View style={styles.puntuacionContainer}>
+                 <Text style={styles.instruccionText}>Calculando puntuaciones de la ronda...</Text>
+                 <View style={styles.progressBarContainer}>
+                    <Text style={styles.progressText}>{estadoBots + 1} / 4 votos recibidos.</Text>
+                    <View style={styles.progressBarBg}>
+                       <View style={[styles.progressBarFill, {width: `${((estadoBots + 1) / 4) * 100}%`}]} />
+                    </View>
+                 </View>
+              </View>
             )}
           </View>
 
-          <View style={styles.boardContainer}>
-            <TouchableOpacity
-              style={styles.boardPreview}
-              activeOpacity={0.9}
-              onPress={() => setMapExpanded(true)}
-            />
-          </View>
-
-          <View style={styles.cardsContainer}>
-            <View style={styles.topRow}>
-              {topRow.map((card) => (
-                <View key={card.id} style={{ marginHorizontal: 6 }}>
-                  <Card
-                    card={card}
-                    selected={selectedCard === card.id}
-                    cardWidth={cardWidth}
-                    onSelect={() => setSelectedCard(card.id)}
-                    onConfirm={handleConfirm}
-                    showConfirm={!isNarrator}
-                  />
+          <View style={styles.bottomAreaRow}>
+            <View style={[styles.panelGlass, styles.manoPanel]}>
+              <View style={styles.manoHeaderRow}>
+                <View>
+                  <Text style={styles.seccionLabel}>TU MANO</Text>
+                  <Text style={styles.tituloFantasia}>Cartas disponibles</Text>
                 </View>
-              ))}
-            </View>
-
-            <View style={styles.bottomRow}>
-              {bottomRow.map((card) => (
-                <View key={card.id} style={{ marginHorizontal: 6 }}>
-                  <Card
-                    card={card}
-                    selected={selectedCard === card.id}
-                    cardWidth={cardWidth}
-                    onSelect={() => setSelectedCard(card.id)}
-                    onConfirm={handleConfirm}
-                    showConfirm={!isNarrator}
-                  />
+                <View style={{alignItems: 'flex-end'}}>
+                  <Text style={styles.seccionLabel}>COMODINES</Text>
+                  <Text style={styles.comodinText}>Sin comodines todavía.</Text>
                 </View>
-              ))}
+              </View>
+              
+              <View style={styles.manoCartasRow}>
+                {misCartas.map((c) => (
+                  <Card 
+                    key={c.id} 
+                    image={c.image} 
+                    selected={fasePartida === 'elegir' && cartaJugadaPropia === c.id} 
+                    isVoting={false}
+                    onSelect={() => {
+                        if(fasePartida === 'elegir' && !accionConfirmada) {
+                            setCartaJugadaPropia(c.id);
+                        }
+                    }} 
+                  />
+                ))}
+              </View>
+            </View>
+
+            <View style={[styles.panelGlass, styles.jugadoresPanel]}>
+              <Text style={styles.seccionLabel}>JUGADORES</Text>
+              <Text style={styles.tituloFantasia}>Mes actual</Text>
+              <View style={styles.listaJugadores}>
+                {jugadores.map(j => (
+                  <View key={j.id} style={styles.jugadorRow}>
+                    <View style={[styles.colorDot, {backgroundColor: j.color}]} />
+                    <View style={{flex: 1, flexDirection: 'row', justifyContent: 'space-between'}}>
+                      <Text style={styles.jugadorNombre} numberOfLines={1}>{j.nombre}</Text>
+                      <Text style={styles.jugadorPuntosTexto}>{j.puntos} pts</Text>
+                    </View>
+                    {j.yo && <View style={styles.yoBadge}><Text style={styles.yoBadgeText}>Tu</Text></View>}
+                  </View>
+                ))}
+              </View>
             </View>
           </View>
 
-        </View>
+          <View style={styles.panelGlass}>
+            <TouchableOpacity 
+              style={styles.acordeonTablero} 
+              activeOpacity={0.8} 
+              onPress={() => setTableroDesplegado(!tableroDesplegado)}
+            >
+              <Text style={styles.seccionLabel}>TABLERO</Text>
+              <Ionicons name={tableroDesplegado ? "chevron-up" : "chevron-down"} size={20} color="#8caea6" />
+            </TouchableOpacity>
 
-        <Modal visible={mapExpanded} animationType="fade" transparent>
-          <View style={styles.mapOverlay}>
-            <View style={styles.mapModal}>
-              <TouchableOpacity onPress={() => setMapExpanded(false)}>
-                <Ionicons name="close" size={34} color="#FCEEB5" />
-              </TouchableOpacity>
-            </View>
+            {tableroDesplegado && (
+               <View style={styles.tableroMock}>
+                 {casillasTablero.map(c => {
+                   const ocupantes = jugadores.filter(j => j.puntos === c.numero);
+
+                   return (
+                     <View key={c.numero} style={[styles.casilla, c.tipo === 'gema' && styles.casillaGema, {borderColor: c.color}]}>
+                       <Text style={[styles.casillaNum, c.tipo === 'gema' && {color: c.color}]}>{c.numero}</Text>
+                       
+                       {ocupantes.length > 0 && (
+                         <View style={styles.fichasContainer}>
+                           {ocupantes.map(j => (
+                             <FichaJugador key={j.id} jugador={j} />
+                           ))}
+                         </View>
+                       )}
+                     </View>
+                   );
+                 })}
+               </View>
+            )}
           </View>
-        </Modal>
 
+        </ScrollView>
       </SafeAreaView>
     </ImageBackground>
   );
@@ -213,160 +378,86 @@ export default function GameScreen() {
 
 const styles = StyleSheet.create({
   background: { flex: 1 },
-
-  safeArea: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.1)',
-  },
-
+  safeArea: { flex: 1, backgroundColor: 'rgba(12, 28, 40, 0.7)' },
+  
   header: {
-    backgroundColor: 'rgba(10, 25, 40, 0.95)',
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 15,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#FCEEB5',
-  },
-
-  headerTitleContainer: {
-    flex: 1,
-    height: 50,
-    marginRight: 10,
-  },
-
-  headerIcons: {
-    flexDirection: 'row',
-    gap: 5,
-  },
-
-  gameContent: {
-    flex: 1,
-  },
-
-  topSection: {
-    paddingHorizontal: 20,
-    paddingTop: 15,
-  },
-
-  phraseText: {
-    fontSize: 26,
-    textAlign: 'center',
-    color: '#FCEEB5',
-    fontFamily: 'FuenteTitulo',
-  },
-
-  narratorContainer: {
-    gap: 12,
-  },
-
-  input: {
-    width: '100%',
-    backgroundColor: '#FCEEB5',
-    paddingVertical: 15,
-    paddingHorizontal: 20,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#d4c494',
-    fontSize: 16,
-  },
-
-  confirmButton: {
-    alignSelf: 'center',
-    backgroundColor: '#A8C8C0',
     paddingVertical: 12,
-    paddingHorizontal: 28,
-    borderRadius: 25,
-    borderWidth: 2,
-    borderColor: '#8caea6',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(168, 200, 192, 0.2)',
   },
+  headerButton: { backgroundColor: 'rgba(255,255,255,0.1)', paddingHorizontal: 15, paddingVertical: 6, borderRadius: 20 },
+  headerButtonText: { color: '#e0e6ed', fontSize: 13, fontWeight: 'bold' },
+  
+  fasePill: { backgroundColor: 'transparent', paddingHorizontal: 20, paddingVertical: 6 },
+  fasePillText: { color: '#FCEEB5', fontWeight: 'bold', fontSize: 16, letterSpacing: 2 },
 
-  confirmText: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#2c3e50',
-  },
+  scrollContent: { padding: 15, gap: 15, paddingBottom: 40 },
 
-  boardContainer: {
-    flex: 1,
-    paddingHorizontal: 20,
-    justifyContent: 'center',
-  },
-
-  boardPreview: {
-    width: '100%',
-    height: '85%',
-    borderRadius: 25,
+  panelGlass: {
+    backgroundColor: 'rgba(30, 60, 75, 0.8)',
+    borderRadius: 15,
     borderWidth: 1,
-    borderColor: '#FCEEB5',
-    backgroundColor: 'rgba(10, 25, 40, 0.9)',
+    borderColor: 'rgba(168, 200, 192, 0.3)',
+    padding: 18,
   },
 
-  cardsContainer: {
-    paddingBottom: 30,
-    paddingTop: 10,
-  },
+  faseLabel: { color: '#8caea6', fontSize: 11, fontWeight: 'bold', letterSpacing: 2, marginBottom: 5 },
+  phraseText: { fontSize: 32, color: '#FCEEB5', fontFamily: 'FuenteTitulo', marginBottom: 15 },
+  instruccionText: { color: '#a0b0b9', fontSize: 14, marginBottom: 15 },
 
-  topRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    marginBottom: 15,
-  },
+  elegirContainer: { alignItems: 'center' },
+  cartaPlaceholder: { width: 140, height: 210, backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 10, borderWidth: 2, borderStyle: 'dashed', borderColor: '#8caea6', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
+  cartaPlaceholderImg: { width: '100%', height: '100%' },
+  placeholderText: { color: '#8caea6', textAlign: 'center', padding: 20, fontSize: 13 },
 
-  bottomRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-  },
+  votacionContainer: {},
+  votacionScroll: { gap: 10, paddingBottom: 10 },
+  votacionFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 15 },
+  
+  botonAccion: { backgroundColor: '#FCEEB5', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20 },
+  botonAccionDisabled: { backgroundColor: 'transparent', borderWidth: 1, borderColor: '#2ecc71' },
+  botonAccionText: { color: '#1a2a3a', fontWeight: 'bold' },
 
-  cardWrapper: {
-    alignItems: 'center',
-  },
+  puntuacionContainer: { marginTop: 10, width: '100%' },
+  progressBarContainer: { backgroundColor: 'rgba(0,0,0,0.3)', padding: 15, borderRadius: 10 },
+  progressText: { color: '#e0e6ed', marginBottom: 10, fontSize: 13 },
+  progressBarBg: { height: 6, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 3, overflow: 'hidden' },
+  progressBarFill: { height: '100%', backgroundColor: '#e74c3c' },
 
-  card: {
-    aspectRatio: 0.65,
-    borderRadius: 12,
-    overflow: 'hidden',
-    borderWidth: 3,
-    borderColor: 'transparent',
-  },
+  bottomAreaRow: { flexDirection: 'column', gap: 15 },
+  
+  manoPanel: { flex: 1 },
+  manoHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15 },
+  seccionLabel: { color: '#8caea6', fontSize: 10, fontWeight: 'bold', letterSpacing: 1.5 },
+  tituloFantasia: { color: '#FCEEB5', fontSize: 22, fontFamily: 'FuenteTitulo', marginTop: 2 },
+  comodinText: { color: '#a0b0b9', fontSize: 12, marginTop: 4 },
+  manoCartasRow: { flexDirection: 'row', justifyContent: 'space-around' },
 
-  cardSelected: {
-    borderColor: '#FCEEB5',
-  },
+  jugadoresPanel: { flex: 1 },
+  listaJugadores: { marginTop: 10, gap: 8 },
+  jugadorRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.3)', padding: 10, borderRadius: 10 },
+  colorDot: { width: 12, height: 12, borderRadius: 6, marginRight: 10 },
+  jugadorNombre: { color: '#e0e6ed', fontSize: 14, fontWeight: '500', paddingRight: 10 },
+  jugadorPuntosTexto: { color: '#8caea6', fontSize: 14, fontWeight: 'bold' },
+  yoBadge: { backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, marginLeft: 10 },
+  yoBadgeText: { color: '#FCEEB5', fontSize: 10, fontWeight: 'bold' },
 
-  cardImage: {
-    width: '100%',
-    height: '100%',
-  },
+  acordeonTablero: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  tableroMock: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 15, justifyContent: 'center' },
+  casilla: { width: 40, height: 40, backgroundColor: 'rgba(255,255,255,0.8)', borderRadius: 8, justifyContent: 'center', alignItems: 'center', position: 'relative' },
+  casillaGema: { transform: [{ rotate: '45deg' }], backgroundColor: 'transparent', borderWidth: 2 },
+  casillaNum: { fontSize: 12, fontWeight: 'bold', color: '#1a2a3a', transform: [{ rotate: '0deg' }] },
+  
+  fichasContainer: { position: 'absolute', bottom: -5, flexDirection: 'row', gap: 2, flexWrap: 'wrap', justifyContent: 'center', width: '100%', zIndex: 10 },
+  fichaJugador: { borderWidth: 1, borderColor: '#fff' },
 
-  chooseButton: {
-    position: 'absolute',
-    bottom: 10,
-    backgroundColor: '#FCEEB5',
-    paddingHorizontal: 18,
-    paddingVertical: 6,
-    borderRadius: 20,
-  },
-
-  chooseText: {
-    fontWeight: 'bold',
-    color: '#2c3e50',
-  },
-
-  mapOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-
-  mapModal: {
-    width: '90%',
-    height: '80%',
-    backgroundColor: 'rgba(10, 25, 40, 0.98)',
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#FCEEB5',
-  },
+  cardWrapper: { alignItems: 'center', marginHorizontal: 5 },
+  card: { width: 85, height: 125, borderRadius: 8, overflow: 'hidden', borderWidth: 2, borderColor: 'transparent', backgroundColor: '#dce8e3' },
+  cardSelected: { borderColor: '#3498db', transform: [{ translateY: -10 }] },
+  cardSelectedVoting: { borderColor: '#FCEEB5', borderWidth: 3 },
+  cardImage: { width: '100%', height: '100%' },
 });

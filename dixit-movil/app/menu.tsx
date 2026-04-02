@@ -20,7 +20,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 SplashScreen.preventAutoHideAsync();
 
-const API_URL = 'http://192.168.1.133:3000/api';
+const API_URL = 'http://192.168.1.13:3000/api';
 
 export default function MenuScreen() {
   const [loaded, error] = useFonts({
@@ -111,10 +111,13 @@ export default function MenuScreen() {
 
       setIsLoadingLobbies(true);
 
-      const response = await fetch(`${API_URL}/lobbies`, {
+      // meto el timestamp para que no me la lie cacheando
+      const timestamp = Date.now();
+      const response = await fetch(`${API_URL}/lobbies?t=${timestamp}`, {
         method: 'GET',
         headers: {
-          Authorization: `Bearer ${token}`
+          Authorization: `Bearer ${token}`,
+          'Cache-Control': 'no-cache'
         }
       });
 
@@ -187,7 +190,28 @@ export default function MenuScreen() {
       setLobbyEngine('Classic');
       setIsPrivateLobby(false);
 
-      await fetchLobbies();
+      // recargo porsiaca
+      fetchLobbies();
+
+      const nuevaSala = data.lobby || data;
+
+      // me toca pasar esto por parametros crudos porque el api de momento me da 404 al consultar, lo paso a texto
+      router.push({
+        pathname: '/main',
+        params: {
+          lobbyId: String(nuevaSala.id ?? nuevaSala._id ?? ''),
+          lobbyCode: String(nuevaSala.lobbyCode ?? nuevaSala.code ?? ''),
+          lobbyName: String(nuevaSala.name ?? lobbyName),
+          engine: String(nuevaSala.engine ?? lobbyEngine),
+          maxPlayers: String(nuevaSala.maxPlayers ?? lobbyPlayers),
+          currentPlayers: '1', 
+          isPrivate: String(Boolean(isPrivateLobby)),
+          status: 'waiting',
+          hostId: String(nuevaSala.hostId ?? ''),
+          players: JSON.stringify(nuevaSala.players ?? []) 
+        }
+      });
+
     } catch (error) {
       console.log('Error creando lobby:', error);
       Alert.alert('Error', 'No se pudo crear el lobby');

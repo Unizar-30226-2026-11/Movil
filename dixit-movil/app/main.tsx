@@ -15,7 +15,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 SplashScreen.preventAutoHideAsync();
 
-const API_URL = 'http://192.168.1.133:3000/api'; 
+const API_URL = 'http://192.168.1.13:3000/api'; 
 
 export default function MainScreen() {
   const {
@@ -25,7 +25,9 @@ export default function MainScreen() {
     maxPlayers,
     currentPlayers,
     isPrivate,
-    status
+    status,
+    hostId, 
+    players 
   } = useLocalSearchParams<{
     lobbyCode?: string;
     lobbyName?: string;
@@ -34,7 +36,10 @@ export default function MainScreen() {
     currentPlayers?: string;
     isPrivate?: string;
     status?: string;
+    hostId?: string;
+    players?: string;
   }>();
+  
   const router = useRouter();
   const [loaded, error] = useFonts({
     'FuenteTitulo': require('../assets/fonts/fuente-dilana.ttf'), 
@@ -45,7 +50,6 @@ export default function MainScreen() {
   const [mazoSeleccionado, setMazoSeleccionado] = useState('Selección Mazo');
   const [modalVisible, setModalVisible] = useState(false);
   const [tipoModal, setTipoModal] = useState(''); 
-//  const [buscando, setBuscando] = useState(false);
   
   const [socialVisible, setSocialVisible] = useState(false);
   const [verPeticiones, setVerPeticiones] = useState(false); 
@@ -68,12 +72,9 @@ export default function MainScreen() {
   const [cartas, setCartas] = useState<any[]>([]);
 
   const [salaActual, setSalaActual] = useState<any>(null);
-//  const [salasPublicas, setSalasPublicas] = useState<any[]>([]);
-//  const [modalSalasVisible, setModalSalasVisible] = useState(false);
   const [modalUnirseVisible, setModalUnirseVisible] = useState(false);
   const [codigoIngresado, setCodigoIngresado] = useState('');
   const [currentUserId, setCurrentUserId] = useState('');
-//  const [previewVisible, setPreviewVisible] = useState(false);
   const [isLoadingLobby, setIsLoadingLobby] = useState(false);
 
   const opcionesMapa = ['El Bosque de los Susurros', 'Ciudad Espejismo', 'Ruinas del Tiempo', 'Aleatorio'];
@@ -273,33 +274,7 @@ export default function MainScreen() {
     }
   };
 
-/*  const cargarSalasPublicas = async () => {
-    setBuscando(true);
-    try {
-      const token = await AsyncStorage.getItem('userToken');
-      const timestamp = new Date().getTime();
-
-      const response = await fetch(`${API_URL}/lobbies?t=${timestamp}`, {
-        method: 'GET',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-
-      const data = await response.json();
-
-      if (response.ok && data.lobbies) {
-        setSalasPublicas(data.lobbies);
-        setModalSalasVisible(true);
-      } else {
-        Alert.alert("Aviso", "No hay salas públicas ahora mismo.");
-      }
-    } catch (error) {
-      console.log("Error al buscar salas:", error);
-    } finally {
-      setBuscando(false);
-    }
-  };*/
-
-const crearSala = async () => {
+  const crearSala = async () => {
     try {
       const token = await AsyncStorage.getItem('userToken');
       const motorElegido = 'Classic';
@@ -378,7 +353,7 @@ const crearSala = async () => {
   }, [loaded, error]);
 
   useEffect(() => {
-    console.log('PARAMS MAIN:', { lobbyCode, lobbyName, engine, maxPlayers, currentPlayers, isPrivate, status });
+    console.log('PARAMS MAIN:', { lobbyCode, lobbyName, engine, maxPlayers, currentPlayers, isPrivate, status, hostId, players });
     console.log('LOBBY CODE EN MAIN:', lobbyCode);
 
     if (lobbyCode) {
@@ -417,14 +392,18 @@ const crearSala = async () => {
   const amigosOnline = amigosFiltrados.filter(a => a.estado === 'online');
   const amigosOffline = amigosFiltrados.filter(a => a.estado !== 'online');
 
+  // parche por si el fetch peta y me devuelve 404, pillo la info del router.push
   const salaVisible = salaActual || (lobbyCode ? {
     lobbyCode,
     name: lobbyName || 'Sala',
     engine: engine || 'Classic',
     maxPlayers: Number(maxPlayers || 4),
     status: status || 'waiting',
-    players: []
+    hostId: hostId,
+    // parseo el array porque de la url viene como string siempre
+    players: players ? JSON.parse(players) : (hostId ? [hostId] : [])
   } : null);  
+  
   const jugadoresSala = salaVisible?.players || [];
   const isHost = salaVisible?.hostId === currentUserId;
   const isJoined = jugadoresSala.includes(currentUserId) || joinedLocally;
@@ -547,9 +526,25 @@ const crearSala = async () => {
               <Ionicons name="chevron-down" size={20} color="#2c3e50" />
             </TouchableOpacity>
 
-            {salaVisible ? (
+           {salaVisible ? (
               isJoined ? (
-                <TouchableOpacity style={styles.readyButton}>
+                // le enchufo el onPress al boton de empezar
+                <TouchableOpacity 
+                  style={styles.readyButton}
+                  onPress={() => {
+                    if (isHost) {
+                      // soy el host, asi que arranco y nos vamos al tablero
+                      // nota: mas adelante aqui habra que mandar un evento por socket
+                      router.push({
+                        pathname: '/gameScreen', 
+                        params: { lobbyCode: salaVisible.lobbyCode }
+                      });
+                    } else {
+                      // de momento solo aviso de que estoy listo
+                      Alert.alert("¡Listo!", "Esperando a que el anfitrión empiece la partida...");
+                    }
+                  }}
+                >
                   <Text style={styles.readyButtonText}>
                     {isHost ? 'Empezar partida' : 'Listo'}
                   </Text>
@@ -592,37 +587,6 @@ const crearSala = async () => {
             </View>
           </TouchableOpacity>
         </Modal>
-
-{/*        <Modal visible={modalSalasVisible} transparent animationType="slide">
-          <View style={styles.formModalOverlay}>
-            <View style={[styles.formBox, {maxHeight: '80%'}]}>
-              <Text style={styles.formModalTitle}>Salas Disponibles</Text>
-              <ScrollView showsVerticalScrollIndicator={false}>
-                {salasPublicas.map((sala, index) => (
-                  <TouchableOpacity 
-                    key={index} 
-                    style={styles.lobbyItem}
-                    onPress={() => unirseASala(sala.lobbyCode)}
-                  >
-                    <View>
-                      <Text style={styles.lobbyName}>{sala.name}</Text>
-                      <Text style={styles.lobbyDetails}>Modo: {sala.engine}</Text>
-                    </View>
-                    <View style={styles.lobbyPlayersBadge}>
-                      <Text style={styles.lobbyPlayersText}>{sala.players?.length || 1}/{sala.maxPlayers || 8}</Text>
-                    </View>
-                  </TouchableOpacity>
-                ))}
-                {salasPublicas.length === 0 && (
-                  <Text style={{textAlign: 'center', color: '#555'}}>No hay salas públicas ahora mismo.</Text>
-                )}
-              </ScrollView>
-              <TouchableOpacity style={[styles.formCancelButton, {width: '100%', marginTop: 20}]} onPress={() => setModalSalasVisible(false)}>
-                <Text style={styles.formButtonText}>Cerrar</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Modal>*/}
 
         <Modal visible={modalUnirseVisible} transparent animationType="fade">
           <View style={styles.formModalOverlay}>
@@ -713,7 +677,7 @@ const crearSala = async () => {
       </SafeAreaView>
     </ImageBackground>
   );
-}
+} 
 
 const styles = StyleSheet.create({
   background: { flex: 1, width: '100%', height: '100%' },
