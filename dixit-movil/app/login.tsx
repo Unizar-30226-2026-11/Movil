@@ -8,10 +8,9 @@ import { useEffect, useState } from 'react';
 import * as SplashScreen from 'expo-splash-screen';
 import Svg, { Text as SvgText } from 'react-native-svg';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { API_URL } from '@/constants/api';
 
 SplashScreen.preventAutoHideAsync();
-
-const API_URL = 'http://10.234.244.253:3000/api';
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -48,14 +47,10 @@ export default function LoginScreen() {
 
       const data = await response.json();
 
-      if (response.ok) {
-        // Guardar el token (la "pulsera VIP") y los datos del usuario
+     if (response.ok) {
         await AsyncStorage.setItem('userToken', data.token);
-        await AsyncStorage.setItem('userData', JSON.stringify(data.user));
         
-        router.replace('/menu'); // Nos vamos al menú principal
-      } else {
-        Alert.alert("Error", data.message || "Credenciales incorrectas");
+        router.replace('/menu'); 
       }
     } catch (e) {
       Alert.alert("Error de red", "No se puede conectar con el servidor.");
@@ -71,13 +66,13 @@ export default function LoginScreen() {
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.keyboardContainer}>
           <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
 
-            <View style={{ height: 70, width: '100%', marginBottom: 30, justifyContent: 'center', alignItems: 'center' }}>
+            <TouchableOpacity style={{ height: 70, width: '100%', marginBottom: 30, justifyContent: 'center', alignItems: 'center' }} onPress={() => router.replace('/')}>
               <Svg height="100%" width="100%">
                 <SvgText fill="black" stroke="#FCEEB5" strokeWidth="0.8" fontSize="42" fontFamily="FuenteTitulo" x="50%" y="55%" textAnchor="middle">
                   A Tale Of Recognition
                 </SvgText>
               </Svg>
-            </View>
+            </TouchableOpacity>
 
             <View style={styles.formContainer}>
               <TextInput

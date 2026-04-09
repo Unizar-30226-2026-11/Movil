@@ -9,8 +9,6 @@ import Svg, { Text as SvgText } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons'; 
 import { useRouter } from 'expo-router';
 import Slider from '@react-native-community/slider';
-
-// IMPORTAMOS LA LIBRERÍA DE MEMORIA
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 SplashScreen.preventAutoHideAsync();
@@ -22,25 +20,19 @@ export default function SettingsScreen() {
     'FuenteTitulo': require('../assets/fonts/fuente-dilana.ttf'), 
   });
 
-  // --- ESTADOS DE CONFIGURACIÓN (Con valores por defecto) ---
   const [sonido, setSonido] = useState(0.8);
   const [musica, setMusica] = useState(0.5);
   const [notificaciones, setNotificaciones] = useState(true);
   const [estadoOnline, setEstadoOnline] = useState(true);
   const [vibracion, setVibracion] = useState(true);
 
-  // --- MAGIA DE CARGAR DATOS AL ENTRAR ---
   useEffect(() => {
     const cargarConfiguracion = async () => {
       try {
-        // Buscamos en la memoria interna el "paquete" llamado 'ajustesUsuario'
         const ajustesGuardados = await AsyncStorage.getItem('ajustesUsuario');
         
         if (ajustesGuardados !== null) {
-          // Si existe, lo transformamos de texto a código entendible (JSON)
           const ajustes = JSON.parse(ajustesGuardados);
-          
-          // Actualizamos nuestros botones y barras con lo que hemos encontrado
           setSonido(ajustes.sonido);
           setMusica(ajustes.musica);
           setNotificaciones(ajustes.notificaciones);
@@ -52,10 +44,9 @@ export default function SettingsScreen() {
       }
     };
 
-    cargarConfiguracion(); // Ejecutamos la función nada más entrar a la pantalla
+    cargarConfiguracion();
   }, []);
 
-  // --- FUNCIONES DE LOS BOTONES ---
   const resetearConfiguracion = () => {
     Alert.alert(
       "Reestablecer", 
@@ -75,7 +66,6 @@ export default function SettingsScreen() {
 
   const guardarCambios = async () => {
     try {
-      // 1. Empaquetamos todo en un objeto
       const ajustesParaGuardar = {
         sonido: sonido,
         musica: musica,
@@ -84,7 +74,6 @@ export default function SettingsScreen() {
         vibracion: vibracion
       };
 
-      // 2. Lo guardamos en el móvil bajo el nombre 'ajustesUsuario' (hay que pasarlo a texto)
       await AsyncStorage.setItem('ajustesUsuario', JSON.stringify(ajustesParaGuardar));
       
       Alert.alert("¡Éxito!", "Configuración guardada correctamente en tu dispositivo.", [
@@ -97,7 +86,6 @@ export default function SettingsScreen() {
     }
   };
 
-  // --- CARGA DE FUENTES ---
   useEffect(() => {
     if (loaded || error) {
       SplashScreen.hideAsync();
@@ -118,13 +106,13 @@ export default function SettingsScreen() {
           <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
             <Ionicons name="arrow-back" size={28} color="#FCEEB5" />
           </TouchableOpacity>
-          <View style={styles.headerTitleContainer}>
+          <TouchableOpacity style={styles.headerTitleContainer} onPress={() => router.replace('/menu')}>
             <Svg height="100%" width="100%" viewBox="0 0 300 50">
               <SvgText fill="black" stroke="#FCEEB5" strokeWidth="0.8" fontSize="26" fontFamily="FuenteTitulo" x="0" y="35">
                 A Tale Of Recognition
               </SvgText>
             </Svg>
-          </View>
+          </TouchableOpacity>
           <View style={styles.headerIcons}>
             <TouchableOpacity style={{ padding: 5 }} onPress={() => router.push('/store')}>
               <Ionicons name="cart-outline" size={26} color="#FCEEB5" />

@@ -6,10 +6,10 @@ import {
   Image,
   SafeAreaView,
   ScrollView,
-  Dimensions,
   ImageBackground,
   Animated,
-  Easing
+  Easing,
+  Modal
 } from 'react-native';
 import { useEffect, useState, useRef } from 'react';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,10 +19,12 @@ import { useRouter } from 'expo-router';
 
 SplashScreen.preventAutoHideAsync();
 
-const { width } = Dimensions.get('window');
+type Comodin = {
+  id: string;
+  valor: number;
+};
 
-// lo separo aqui para que el codigo del render no quede infumable
-function Card({ image, selected, isVoting, onSelect }) {
+function Card({ image, selected, isVoting, onSelect }: any) {
   return (
     <View style={styles.cardWrapper}>
       <TouchableOpacity
@@ -40,12 +42,10 @@ function Card({ image, selected, isVoting, onSelect }) {
   );
 }
 
-// este es el topito de los jugadores, le meto su propio animated value para que salte suave
-function FichaJugador({ jugador, size = 12 }) {
+function FichaJugador({ jugador, size = 12 }: any) {
   const animValue = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    // reseteo y pego el bote cuando el pavo gana puntos
     animValue.setValue(0);
     Animated.timing(animValue, {
       toValue: 1,
@@ -53,7 +53,7 @@ function FichaJugador({ jugador, size = 12 }) {
       easing: Easing.out(Easing.back(1.5)),
       useNativeDriver: true,
     }).start();
-  }, [jugador.puntos]);
+  }, [animValue, jugador.puntos]);
 
   return (
     <Animated.View 
@@ -76,7 +76,6 @@ function FichaJugador({ jugador, size = 12 }) {
 export default function GameScreen() {
   const router = useRouter();
 
-  // me monto todos los estados de la movida para ir jugando con los cambios de pantalla
   const [fasePartida, setFasePartida] = useState('elegir'); 
   const [cartaJugadaPropia, setCartaJugadaPropia] = useState<string | null>(null);
   const [cartaVotada, setCartaVotada] = useState<string | null>(null);
@@ -84,10 +83,13 @@ export default function GameScreen() {
   const [tableroDesplegado, setTableroDesplegado] = useState(false); 
   const [estadoBots, setEstadoBots] = useState(0); 
   
-  // la frase por defecto para la primera ronda
   const [fraseActual, setFraseActual] = useState('Una mirada perdida.');
+  
+  const [comodines, setComodines] = useState<Comodin[]>([]);
+  
+  const [modalComodinVisible, setModalComodinVisible] = useState(false);
+  const [comodinReciente, setComodinReciente] = useState<number | null>(null);
 
-  // unas cuantas frases falsas para ir tirando y probar que cambia
   const pistasMock = [
     'Una mirada perdida.',
     'El último tren a ninguna parte.',
@@ -161,17 +163,28 @@ export default function GameScreen() {
       setTableroDesplegado(true); 
       
       setTimeout(() => {
-        setJugadores(prev => 
-          prev.map(j => ({
+        setJugadores(prev => {
+          const nuevosJugadores = prev.map(j => ({
             ...j,
             puntos: Math.min(42, j.puntos + Math.floor(Math.random() * 6) + 1)
-          }))
-        );
+          }));
+
+          const miJugador = nuevosJugadores.find(j => j.yo);
+          if (miJugador && (miJugador.puntos - 1) % 5 === 0) {
+            setTimeout(() => {
+              const valorComodin = Math.floor(Math.random() * 3) + 1;
+              setComodines(comos => [...comos, { id: Date.now().toString(), valor: valorComodin }]);
+              setComodinReciente(valorComodin);
+              setModalComodinVisible(true);
+            }, 500);
+          }
+
+          return nuevosJugadores;
+        });
         
-        // dejo todo limpito para la ronda 2
         setTimeout(() => {
             const pistaRandom = pistasMock[Math.floor(Math.random() * pistasMock.length)];
-            setFraseActual(pistaRandom); // le pego el cambiazo a la pista aqui
+            setFraseActual(pistaRandom); 
 
             setFasePartida('elegir');
             setCartaJugadaPropia(null);
@@ -182,6 +195,21 @@ export default function GameScreen() {
 
       }, 1000);
     }, 3500);
+  };
+
+  const simularComodinManual = () => {
+    const valorComodin = Math.floor(Math.random() * 3) + 1;
+    setComodines(prev => [...prev, { id: Date.now().toString(), valor: valorComodin }]);
+    setComodinReciente(valorComodin);
+    setModalComodinVisible(true);
+  };
+
+  const usarComodin = (id: string, valor: number) => {
+    setComodines(prev => prev.filter(c => c.id !== id));
+    setJugadores(prev => prev.map(j => 
+      j.yo ? { ...j, puntos: Math.min(42, j.puntos + valor) } : j
+    ));
+    setTableroDesplegado(true);
   };
 
   if (!loaded && !error) return null;
@@ -297,8 +325,27 @@ export default function GameScreen() {
                   <Text style={styles.tituloFantasia}>Cartas disponibles</Text>
                 </View>
                 <View style={{alignItems: 'flex-end'}}>
-                  <Text style={styles.seccionLabel}>COMODINES</Text>
-                  <Text style={styles.comodinText}>Sin comodines todavía.</Text>
+                  <View style={{flexDirection: 'row', alignItems: 'center', gap: 5}}>
+                    <Text style={styles.seccionLabel}>COMODINES</Text>
+                    <TouchableOpacity onPress={simularComodinManual} style={styles.debugBtn}>
+                      <Ionicons name="add-circle" size={16} color="#d988b3" />
+                    </TouchableOpacity>
+                  </View>
+                  {comodines.length === 0 ? (
+                    <Text style={styles.comodinText}>Sin comodines todavía.</Text>
+                  ) : (
+                    <ScrollView horizontal style={styles.comodinesList}>
+                      {comodines.map(c => (
+                        <TouchableOpacity 
+                          key={c.id} 
+                          style={styles.comodinBtn} 
+                          onPress={() => usarComodin(c.id, c.valor)}
+                        >
+                          <Text style={styles.comodinBtnText}>+{c.valor}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  )}
                 </View>
               </View>
               
@@ -371,6 +418,22 @@ export default function GameScreen() {
           </View>
 
         </ScrollView>
+
+        <Modal visible={modalComodinVisible} transparent animationType="fade">
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Ionicons name="star" size={60} color="#d988b3" />
+              <Text style={styles.modalTitle}>¡Comodín conseguido!</Text>
+              <Text style={styles.modalText}>
+                Has caído en una casilla especial y has ganado un salto de <Text style={{fontWeight: 'bold', color: '#d988b3'}}>+{comodinReciente}</Text> casillas. Úsalo cuando quieras.
+              </Text>
+              <TouchableOpacity style={styles.modalButton} onPress={() => setModalComodinVisible(false)}>
+                <Text style={styles.modalButtonText}>Aceptar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
       </SafeAreaView>
     </ImageBackground>
   );
@@ -434,7 +497,13 @@ const styles = StyleSheet.create({
   manoHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15 },
   seccionLabel: { color: '#8caea6', fontSize: 10, fontWeight: 'bold', letterSpacing: 1.5 },
   tituloFantasia: { color: '#FCEEB5', fontSize: 22, fontFamily: 'FuenteTitulo', marginTop: 2 },
+  
   comodinText: { color: '#a0b0b9', fontSize: 12, marginTop: 4 },
+  comodinesList: { flexDirection: 'row', marginTop: 4 },
+  comodinBtn: { backgroundColor: '#d988b3', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: '#FCEEB5', marginLeft: 5 },
+  comodinBtnText: { color: '#1a2a3a', fontWeight: 'bold', fontSize: 12 },
+  debugBtn: { paddingLeft: 5, marginTop: -2 },
+
   manoCartasRow: { flexDirection: 'row', justifyContent: 'space-around' },
 
   jugadoresPanel: { flex: 1 },
@@ -460,4 +529,11 @@ const styles = StyleSheet.create({
   cardSelected: { borderColor: '#3498db', transform: [{ translateY: -10 }] },
   cardSelectedVoting: { borderColor: '#FCEEB5', borderWidth: 3 },
   cardImage: { width: '100%', height: '100%' },
+
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', zIndex: 100 },
+  modalContent: { width: '85%', backgroundColor: 'rgba(30, 60, 75, 0.98)', borderRadius: 20, padding: 30, alignItems: 'center', borderWidth: 2, borderColor: '#d988b3' },
+  modalTitle: { fontSize: 24, fontFamily: 'FuenteTitulo', color: '#FCEEB5', marginVertical: 15, textAlign: 'center' },
+  modalText: { fontSize: 15, color: '#e0e6ed', textAlign: 'center', marginBottom: 25, lineHeight: 22 },
+  modalButton: { backgroundColor: '#d988b3', paddingHorizontal: 30, paddingVertical: 12, borderRadius: 25 },
+  modalButtonText: { color: '#1a2a3a', fontWeight: 'bold', fontSize: 16 },
 });

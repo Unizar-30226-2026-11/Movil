@@ -9,13 +9,11 @@ import { useEffect, useState } from 'react';
 import * as SplashScreen from 'expo-splash-screen';
 import Svg, { Text as SvgText } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons'; 
-import { useRouter } from 'expo-router';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { API_URL } from '@/constants/api';
 
 SplashScreen.preventAutoHideAsync();
-
-const API_URL = 'http://192.168.1.13:3000/api'; 
 
 export default function MainScreen() {
   const {
@@ -61,9 +59,6 @@ export default function MainScreen() {
 
   const [isSearching, setIsSearching] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [modalMensajeVisible, setModalMensajeVisible] = useState(false);
-  const [amigoMensaje, setAmigoMensaje] = useState<any>(null);
-  const [textoMensaje, setTextoMensaje] = useState('');
   const [modalAñadirVisible, setModalAñadirVisible] = useState(false);
   const [nuevoAmigoNombre, setNuevoAmigoNombre] = useState('');
 
@@ -97,8 +92,7 @@ export default function MainScreen() {
             id: amigo.id,
             nombre: amigo.username,
             estado: amigo.status || 'offline',
-            actividad: amigo.status === 'online' ? 'En línea' : '',
-            avatar: `https://i.pravatar.cc/150?u=${amigo.username}`
+            actividad: amigo.status === 'online' ? 'En línea' : ''
           })));
         }
       }
@@ -274,37 +268,6 @@ export default function MainScreen() {
     }
   };
 
-  const crearSala = async () => {
-    try {
-      const token = await AsyncStorage.getItem('userToken');
-      const motorElegido = 'Classic';
-      const response = await fetch(`${API_URL}/lobbies`, {
-        method: 'POST',
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          name: "Mi Super Partida", 
-          maxPlayers: 4,
-          engine: motorElegido,
-          isPrivate: false
-        })
-      });
-
-      const data = await response.json();
-
-      if (response.ok && data.lobby) {
-        setSalaActual(data.lobby);
-      } else {
-        console.log("Fallo del backend al crear sala:", data);
-        Alert.alert("Fallo del servidor", data.message || "Datos incorrectos (Error 400)");
-      }
-    } catch (error) {
-      console.log("Petada al crear sala:", error);
-    }
-  };
-
   const unirseASala = async (codigo: string) => {
     if (!codigo.trim()) return;
 
@@ -362,7 +325,7 @@ export default function MainScreen() {
       setSalaActual(null);
       setIsLoadingLobby(false);
     }
-  }, [lobbyCode, lobbyName, engine, maxPlayers, currentPlayers, isPrivate, status]);
+  }, [currentPlayers, engine, hostId, isPrivate, lobbyCode, lobbyName, maxPlayers, players, status]);
 
   if (!loaded && !error) return null;
 
@@ -378,21 +341,12 @@ export default function MainScreen() {
     else { setVotos(votos - miVoto + tipo); setMiVoto(tipo); }
   };
 
-  const enviarMensaje = () => {
-    if (textoMensaje.trim() === '') return;
-    Alert.alert("Mensaje enviado", `A ${amigoMensaje.nombre}: "${textoMensaje}"`);
-    setModalMensajeVisible(false);
-    setTextoMensaje('');
-  };
-
-  const invitarAmigo = (nombre: string) => { Alert.alert("Invitación enviada", `Has invitado a ${nombre} a tu sala.`); };
-
   const opcionesActuales = tipoModal === 'mapa' ? opcionesMapa : opcionesMazo;
   const amigosFiltrados = amigos.filter(a => a.nombre.toLowerCase().includes(searchQuery.toLowerCase()));
   const amigosOnline = amigosFiltrados.filter(a => a.estado === 'online');
   const amigosOffline = amigosFiltrados.filter(a => a.estado !== 'online');
+  const getInitial = (nombre: string) => nombre?.trim()?.charAt(0)?.toUpperCase() || '?';
 
-  // parche por si el fetch peta y me devuelve 404, pillo la info del router.push
   const salaVisible = salaActual || (lobbyCode ? {
     lobbyCode,
     name: lobbyName || 'Sala',
@@ -400,7 +354,6 @@ export default function MainScreen() {
     maxPlayers: Number(maxPlayers || 4),
     status: status || 'waiting',
     hostId: hostId,
-    // parseo el array porque de la url viene como string siempre
     players: players ? JSON.parse(players) : (hostId ? [hostId] : [])
   } : null);  
   
@@ -412,13 +365,13 @@ export default function MainScreen() {
     <ImageBackground source={require('../assets/images/background.jpg')} style={styles.background} resizeMode="cover">
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.header}>
-          <View style={styles.headerTitleContainer}>
+          <TouchableOpacity style={styles.headerTitleContainer} onPress={() => router.replace('/menu')}>
             <Svg height="100%" width="100%" viewBox="0 0 300 50">
               <SvgText fill="black" stroke="#FCEEB5" strokeWidth="0.8" fontSize="28" fontFamily="FuenteTitulo" x="0" y="35">
                 A Tale Of Recognition
               </SvgText>
             </Svg>
-          </View>
+          </TouchableOpacity>
           
           <View style={styles.headerIcons}>
             <TouchableOpacity style={{ padding: 5 }} onPress={() => router.push('/store')}><Ionicons name="cart-outline" size={26} color="#FCEEB5" /></TouchableOpacity>
@@ -528,19 +481,15 @@ export default function MainScreen() {
 
            {salaVisible ? (
               isJoined ? (
-                // le enchufo el onPress al boton de empezar
                 <TouchableOpacity 
                   style={styles.readyButton}
                   onPress={() => {
                     if (isHost) {
-                      // soy el host, asi que arranco y nos vamos al tablero
-                      // nota: mas adelante aqui habra que mandar un evento por socket
                       router.push({
                         pathname: '/gameScreen', 
                         params: { lobbyCode: salaVisible.lobbyCode }
                       });
                     } else {
-                      // de momento solo aviso de que estoy listo
                       Alert.alert("¡Listo!", "Esperando a que el anfitrión empiece la partida...");
                     }
                   }}
@@ -641,7 +590,9 @@ export default function MainScreen() {
                 {amigosOnline.length > 0 && <Text style={styles.socialSectionTitle}>CONECTADOS</Text>}
                 {amigosOnline.map((amigo) => (
                   <View key={amigo.id} style={styles.friendItem}>
-                    <Image source={{ uri: amigo.avatar }} style={styles.friendAvatar} />
+                    <View style={styles.friendAvatar}>
+                      <Text style={styles.friendAvatarText}>{getInitial(amigo.nombre)}</Text>
+                    </View>
                     <View style={styles.friendInfo}><Text style={styles.friendName}>{amigo.nombre}</Text><Text style={styles.friendActivity}>En línea</Text></View>
                     <TouchableOpacity onPress={() => eliminarAmigo(amigo.id, amigo.nombre)}><Ionicons name="trash-outline" size={20} color="#e74c3c" /></TouchableOpacity>
                   </View>
@@ -650,7 +601,9 @@ export default function MainScreen() {
                 {amigosOffline.length > 0 && <Text style={styles.socialSectionTitle}>DESCONECTADOS</Text>}
                 {amigosOffline.map((amigo) => (
                   <View key={amigo.id} style={styles.friendItem}>
-                    <Image source={{ uri: amigo.avatar }} style={styles.friendAvatar} />
+                    <View style={styles.friendAvatar}>
+                      <Text style={styles.friendAvatarText}>{getInitial(amigo.nombre)}</Text>
+                    </View>
                     <View style={styles.friendInfo}><Text style={styles.friendName}>{amigo.nombre}</Text></View>
                     <TouchableOpacity onPress={() => eliminarAmigo(amigo.id, amigo.nombre)}><Ionicons name="trash-outline" size={20} color="#e74c3c" /></TouchableOpacity>
                   </View>
@@ -746,7 +699,8 @@ const styles = StyleSheet.create({
   socialScrollContent: { padding: 20, paddingBottom: 40 },
   socialSectionTitle: { color: '#8caea6', fontSize: 14, fontWeight: 'bold', marginBottom: 15, marginTop: 15 },
   friendItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.05)', padding: 10, borderRadius: 12, marginBottom: 10 },
-  friendAvatar: { width: 45, height: 45, borderRadius: 22, marginRight: 15 },
+  friendAvatar: { width: 45, height: 45, borderRadius: 22, marginRight: 15, backgroundColor: '#A8C8C0', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#FCEEB5' },
+  friendAvatarText: { color: '#10212e', fontSize: 18, fontWeight: 'bold' },
   friendInfo: { flex: 1 },
   friendName: { color: '#FCEEB5', fontSize: 16, fontWeight: 'bold' },
   friendActivity: { color: '#8caea6', fontSize: 12 },

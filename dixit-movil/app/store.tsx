@@ -14,11 +14,10 @@ import { useFonts } from 'expo-font';
 import { useEffect, useState } from 'react';
 import * as SplashScreen from 'expo-splash-screen';
 import Svg, { Text as SvgText } from 'react-native-svg';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
-const API_URL = 'http://10.1.65.221:3000/api';
+import { API_URL } from '@/constants/api';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -44,7 +43,7 @@ export default function StoreScreen() {
   const fetchShopItems = async () => {
     try {
       const token = await AsyncStorage.getItem('userToken');
-      const timestamp = new Date().getTime(); // Truco anti-caché también para la tienda
+      const timestamp = new Date().getTime();
 
       const response = await fetch(`${API_URL}/shop/items?t=${timestamp}`, {
         method: 'GET',
@@ -73,7 +72,6 @@ export default function StoreScreen() {
   };
 
   const comprarProducto = async () => {
-    // PROTECCIÓN FRONTEND: Comprobamos si el precio es mayor que las monedas que tenemos
     if (productoSeleccionado.price > coins) {
       Alert.alert("Saldo insuficiente", "No tienes suficientes monedas para comprar este artículo.");
       setModalCompraVisible(false);
@@ -97,7 +95,6 @@ export default function StoreScreen() {
       const data = await response.json();
 
       if (response.ok) {
-        // Refrescamos el balance para ver el nuevo saldo inmediatamente
         await fetchBalance(); 
         Alert.alert("¡Enhorabuena!", "Compra realizada con éxito.");
       } else {
@@ -107,7 +104,7 @@ export default function StoreScreen() {
     } catch (error) {
       console.log("Fallo al procesar la compra", error);
     } finally {
-       setModalCompraVisible(false); // Cerramos el modal pase lo que pase
+       setModalCompraVisible(false);
     }
   };
 
@@ -117,7 +114,7 @@ export default function StoreScreen() {
       const token = await AsyncStorage.getItem('userToken');
       if (!token) return;
 
-      const timestamp = new Date().getTime(); // Nuestro querido Cache Buster
+      const timestamp = new Date().getTime();
 
       const response = await fetch(`${API_URL}/users/balance?t=${timestamp}`, {
         method: 'GET',
@@ -129,7 +126,6 @@ export default function StoreScreen() {
 
       const data = await response.json();
 
-      // Mismo apaño que en menu.tsx para leer bien el JSON anidado
       if (data.balance && typeof data.balance.balance === 'number') {
         setCoins(data.balance.balance);
       } else if (typeof data.balance === 'number') {
@@ -158,7 +154,7 @@ export default function StoreScreen() {
             <Ionicons name="arrow-back" size={28} color="#FCEEB5" />
           </TouchableOpacity>
 
-          <View style={styles.headerTitleContainer}>
+          <TouchableOpacity style={styles.headerTitleContainer} onPress={() => router.replace('/menu')}>
             <Svg height="100%" width="100%" viewBox="0 0 300 50">
               <SvgText
                 fill="black"
@@ -172,17 +168,13 @@ export default function StoreScreen() {
                 A Tale Of Recognition
               </SvgText>
             </Svg>
-          </View>
+          </TouchableOpacity>
 
           <View style={styles.headerIcons}>
             <View style={styles.coinsContainer}>
               <Text style={styles.coinsText}>{coins}</Text>
               <Ionicons name="cash" size={18} color="#FFD700" />
             </View>
-
-            <TouchableOpacity onPress={() => router.replace('/menu')} style={{ padding: 5 }}>
-              <Ionicons name="home-outline" size={26} color="#FCEEB5" />
-            </TouchableOpacity>
 
             <TouchableOpacity onPress={() => router.push('/profile')} style={{ padding: 5 }}>
               <Ionicons name="person-circle-outline" size={26} color="#FCEEB5" />

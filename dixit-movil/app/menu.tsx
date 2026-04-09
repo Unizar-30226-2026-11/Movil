@@ -17,10 +17,9 @@ import Svg, { Text as SvgText } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { API_URL } from '@/constants/api';
 
 SplashScreen.preventAutoHideAsync();
-
-const API_URL = 'http://192.168.1.13:3000/api';
 
 export default function MenuScreen() {
   const [loaded, error] = useFonts({
@@ -111,7 +110,6 @@ export default function MenuScreen() {
 
       setIsLoadingLobbies(true);
 
-      // meto el timestamp para que no me la lie cacheando
       const timestamp = Date.now();
       const response = await fetch(`${API_URL}/lobbies?t=${timestamp}`, {
         method: 'GET',
@@ -190,12 +188,10 @@ export default function MenuScreen() {
       setLobbyEngine('Classic');
       setIsPrivateLobby(false);
 
-      // recargo porsiaca
       fetchLobbies();
 
       const nuevaSala = data.lobby || data;
 
-      // me toca pasar esto por parametros crudos porque el api de momento me da 404 al consultar, lo paso a texto
       router.push({
         pathname: '/main',
         params: {
@@ -242,7 +238,7 @@ export default function MenuScreen() {
       <SafeAreaView style={styles.safeArea}>
 
         <View style={styles.header}>
-          <View style={styles.headerTitleContainer}>
+          <TouchableOpacity style={styles.headerTitleContainer} onPress={() => router.replace('/menu')}>
             <Svg height="100%" width="100%" viewBox="0 0 300 50">
               <SvgText
                 fill="black"
@@ -256,7 +252,7 @@ export default function MenuScreen() {
                 A Tale Of Recognition
               </SvgText>
             </Svg>
-          </View>
+          </TouchableOpacity>
 
           <View style={styles.headerIcons}>
             <TouchableOpacity onPress={() => router.push('/store')}>

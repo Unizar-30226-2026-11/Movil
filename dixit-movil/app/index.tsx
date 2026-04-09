@@ -1,18 +1,17 @@
-import { ImageBackground, StyleSheet, Text, View, TouchableOpacity, Alert } from 'react-native';
-import { useFonts } from 'expo-font'; 
-import * as SplashScreen from 'expo-splash-screen'; 
+import { ImageBackground, StyleSheet, Text, View, TouchableOpacity } from 'react-native';
+import { useFonts } from 'expo-font';
+import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
-import { useRouter } from 'expo-router'; 
-// 1. IMPORTAMOS LA LIBRERÍA DE DIBUJO
+import { useRouter } from 'expo-router';
 import Svg, { Text as SvgText } from 'react-native-svg';
 
 SplashScreen.preventAutoHideAsync();
 
 export default function HomeScreen() {
-  const router = useRouter(); 
+  const router = useRouter();
 
   const [loaded, error] = useFonts({
-    'FuenteTitulo': require('@/assets/fonts/fuente-dilana.ttf'), 
+    FuenteTitulo: require('@/assets/fonts/fuente-dilana.ttf'),
   });
 
   useEffect(() => {
@@ -27,19 +26,14 @@ export default function HomeScreen() {
 
   return (
     <ImageBackground
-      source={require('@/assets/images/background.jpg')} 
+      source={require('@/assets/images/background.jpg')}
       style={styles.background}
-      resizeMode="cover" 
+      resizeMode="cover"
     >
       <View style={styles.overlay}>
-
         <View style={styles.contentContainer}>
-          
-          {/* 2. REEMPLAZAMOS LOS <Text> POR EL SVG EN DOS LÍNEAS */}
-          <View style={{ height: 130, width: '100%', alignItems: 'center', justifyContent: 'center' }}>
+          <TouchableOpacity style={styles.titleContainer} onPress={() => router.replace('/')}>
             <Svg height="100%" width="100%">
-              
-              {/* Primera línea: "A Tale Of" */}
               <SvgText
                 fill="black"
                 stroke="#FCEEB5"
@@ -47,13 +41,12 @@ export default function HomeScreen() {
                 fontSize="50"
                 fontFamily="FuenteTitulo"
                 x="50%"
-                y="45%" // Posición más arriba
+                y="45%"
                 textAnchor="middle"
               >
                 A Tale Of
               </SvgText>
 
-              {/* Segunda línea: "Recognition" */}
               <SvgText
                 fill="black"
                 stroke="#FCEEB5"
@@ -61,34 +54,24 @@ export default function HomeScreen() {
                 fontSize="50"
                 fontFamily="FuenteTitulo"
                 x="50%"
-                y="95%" // Posición más abajo
+                y="95%"
                 textAnchor="middle"
               >
                 Recognition
               </SvgText>
-              
             </Svg>
-          </View>
-          
+          </TouchableOpacity>
         </View>
 
         <View style={styles.buttonsContainer}>
-          <TouchableOpacity 
-            style={styles.primaryButton}
-            onPress={() => router.push('/register')} 
-          >
+          <TouchableOpacity style={styles.primaryButton} onPress={() => router.push('/register')}>
             <Text style={styles.primaryButtonText}>Registrarse</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity 
-            style={styles.secondaryButton}
-           // Añadimos la ruta de navegación aquí
-            onPress={() => router.push('/login')}
-          >
-           <Text style={styles.secondaryButtonText}>Iniciar Sesión</Text>
+          <TouchableOpacity style={styles.secondaryButton} onPress={() => router.push('/login')}>
+            <Text style={styles.secondaryButtonText}>Iniciar Sesion</Text>
           </TouchableOpacity>
         </View>
-
       </View>
     </ImageBackground>
   );
@@ -96,12 +79,12 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   background: {
-    flex: 1, 
+    flex: 1,
     justifyContent: 'center',
   },
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.3)', 
+    backgroundColor: 'rgba(0,0,0,0.3)',
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 20,
@@ -112,8 +95,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     width: '100%',
   },
-  // (He borrado el estilo customTitle porque ya está configurado dentro del SvgText)
-
+  titleContainer: {
+    height: 130,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   buttonsContainer: {
     width: '100%',
     paddingBottom: 80,
@@ -124,7 +111,7 @@ const styles = StyleSheet.create({
     paddingVertical: 18,
     borderRadius: 30,
     alignItems: 'center',
-    shadowColor: "#000",
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 4.65,
@@ -137,7 +124,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   secondaryButton: {
-    backgroundColor: 'rgba(0,0,0,0.4)', 
+    backgroundColor: 'rgba(0,0,0,0.4)',
     borderWidth: 1.5,
     borderColor: '#ffffff',
     paddingVertical: 16,

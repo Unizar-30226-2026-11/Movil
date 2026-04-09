@@ -1,5 +1,5 @@
 import { 
-  StyleSheet, Text, View, ImageBackground, Image, 
+  StyleSheet, Text, View, ImageBackground,
   TouchableOpacity, ScrollView, SafeAreaView, Alert, Modal, TextInput 
 } from 'react-native';
 import { useFonts } from 'expo-font';
@@ -9,9 +9,9 @@ import Svg, { Text as SvgText } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons'; 
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { API_URL } from '@/constants/api';
 
 SplashScreen.preventAutoHideAsync();
-const API_URL = 'http://10.234.244.253:3000/api';
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -25,7 +25,6 @@ export default function ProfileScreen() {
     email: '',
     titulo: 'Jugador',
     nivel: 1,
-    avatar: 'https://i.pravatar.cc/150?img=18',
     estadisticas: {
       partidas: 0,
       victorias: 0,
@@ -42,6 +41,7 @@ export default function ProfileScreen() {
   const [passwordActual, setPasswordActual] = useState('');
   const [nuevaPassword, setNuevaPassword] = useState('');
   const [confirmarPassword, setConfirmarPassword] = useState('');
+  const inicialUsuario = usuario.nombre.trim().charAt(0).toUpperCase() || '?';
 
   const fetchProfile = async () => {
     try {
@@ -121,7 +121,7 @@ export default function ProfileScreen() {
       await AsyncStorage.setItem('perfilUsuario', JSON.stringify(usuarioActualizado));
       setUsuario(usuarioActualizado);
       setModalPerfilVisible(false);
-    } catch (e) {
+    } catch {
       Alert.alert("Error", "No se pudo guardar el perfil.");
     }
   };
@@ -143,16 +143,14 @@ export default function ProfileScreen() {
     setConfirmarPassword('');
   };
 
-  const cerrarSesion = () => {
-    Alert.alert(
-      "Cerrar Sesión", 
-      "¿Seguro que quieres salir de tu cuenta?",
-      [
-        { text: "Cancelar", style: "cancel" },
-        { text: "Sí, salir", onPress: () => router.replace('/login') } 
-      ]
-    );
-  };
+  const cerrarSesion = async () => {
+      await AsyncStorage.removeItem('userToken');
+      
+      if (router.canGoBack()) {
+        router.dismissAll();
+      }
+      router.replace('/login');
+    };
 
   useEffect(() => {
     if (loaded || error) {
@@ -178,13 +176,13 @@ export default function ProfileScreen() {
             <Ionicons name="arrow-back" size={28} color="#FCEEB5" />
           </TouchableOpacity>
 
-          <View style={styles.headerTitleContainer}>
+          <TouchableOpacity style={styles.headerTitleContainer} onPress={() => router.replace('/menu')}>
             <Svg height="100%" width="100%" viewBox="0 0 300 50">
               <SvgText fill="black" stroke="#FCEEB5" strokeWidth="0.8" fontSize="26" fontFamily="FuenteTitulo" x="0" y="35">
                 A Tale Of Recognition
               </SvgText>
             </Svg>
-          </View>
+          </TouchableOpacity>
           
           <View style={styles.headerIcons}>
             <TouchableOpacity style={{ padding: 5 }} onPress={() => router.push('/store')}>
@@ -201,10 +199,9 @@ export default function ProfileScreen() {
           <View style={styles.panel}>
             <View style={styles.profileHeader}>
               <View style={styles.avatarContainer}>
-                <Image source={{ uri: usuario.avatar }} style={styles.avatar} />
-                <TouchableOpacity style={styles.editAvatarButton} onPress={() => Alert.alert('Avatar', 'Próximamente: Galería de avatares')}>
-                  <Ionicons name="camera" size={16} color="#0f2027" />
-                </TouchableOpacity>
+                <View style={styles.avatar}>
+                  <Text style={styles.avatarText}>{inicialUsuario}</Text>
+                </View>
               </View>
               
               <View style={styles.profileInfo}>
@@ -385,8 +382,8 @@ const styles = StyleSheet.create({
   
   profileHeader: { flexDirection: 'row', alignItems: 'center', gap: 20 },
   avatarContainer: { position: 'relative' },
-  avatar: { width: 80, height: 80, borderRadius: 40, borderWidth: 2, borderColor: '#A8C8C0' },
-  editAvatarButton: { position: 'absolute', bottom: 0, right: 0, backgroundColor: '#FCEEB5', width: 28, height: 28, borderRadius: 14, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#0f2027' },
+  avatar: { width: 80, height: 80, borderRadius: 40, borderWidth: 2, borderColor: '#A8C8C0', backgroundColor: '#dce8e3', justifyContent: 'center', alignItems: 'center' },
+  avatarText: { fontSize: 34, fontWeight: 'bold', color: '#2c3e50' },
   profileInfo: { flex: 1 },
   username: { fontSize: 22, fontWeight: 'bold', color: '#2c3e50' },
   userTitle: { fontSize: 14, color: '#7f8c8d', fontStyle: 'italic', marginBottom: 8 },
@@ -432,3 +429,4 @@ const styles = StyleSheet.create({
   saveButton: { backgroundColor: '#A8C8C0', paddingVertical: 12, borderRadius: 10, width: '48%', alignItems: 'center' },
   buttonText: { color: 'white', fontWeight: 'bold', fontSize: 16, textShadowColor: 'rgba(0,0,0,0.2)', textShadowOffset: {width: 0, height: 1}, textShadowRadius: 2 },
 });
+
