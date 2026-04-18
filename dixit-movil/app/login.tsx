@@ -9,11 +9,13 @@ import * as SplashScreen from 'expo-splash-screen';
 import Svg, { Text as SvgText } from 'react-native-svg';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URL } from '@/constants/api';
+import { useGameSession } from '@/contexts/game-session-context';
 
 SplashScreen.preventAutoHideAsync();
 
 export default function LoginScreen() {
   const router = useRouter();
+  const { refreshSession } = useGameSession();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -47,10 +49,12 @@ export default function LoginScreen() {
 
       const data = await response.json();
 
-     if (response.ok) {
+      if (response.ok) {
         await AsyncStorage.setItem('userToken', data.token);
-        
+        await refreshSession();
         router.replace('/menu'); 
+      } else {
+        Alert.alert("Error", data.message || "No se pudo iniciar sesión.");
       }
     } catch (e) {
       Alert.alert("Error de red", "No se puede conectar con el servidor.");

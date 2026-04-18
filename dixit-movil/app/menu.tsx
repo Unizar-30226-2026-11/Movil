@@ -18,10 +18,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URL } from '@/constants/api';
+import { useGameSession } from '@/contexts/game-session-context';
 
 SplashScreen.preventAutoHideAsync();
 
 export default function MenuScreen() {
+  const { activeGameId } = useGameSession();
   const [loaded, error] = useFonts({
     'FuenteTitulo': require('../assets/fonts/fuente-dilana.ttf'),
   });
@@ -154,6 +156,15 @@ export default function MenuScreen() {
 
       if (!lobbyName.trim()) {
         Alert.alert('Error', 'El lobby debe tener nombre');
+        return;
+      }
+
+      if (activeGameId) {
+        Alert.alert('Partida activa', 'Ya tienes una partida en curso. Vuelve a ella antes de crear otra.');
+        router.push({
+          pathname: '/gameScreen',
+          params: { gameId: activeGameId },
+        });
         return;
       }
 
@@ -371,19 +382,24 @@ export default function MenuScreen() {
                   style={styles.lobbyCard}
                   activeOpacity={0.9}
                   onPress={() =>
-                    router.push({
-                      pathname: '/main',
-                      params: {
-                        lobbyId: String(lobby.id ?? ''),
-                        lobbyCode: String(lobby.lobbyCode ?? lobby.code ?? ''),
-                        lobbyName: String(lobby.name ?? lobby.nombre ?? ''),
-                        engine: String(lobby.engine ?? lobby.modo ?? 'Classic'),
-                        maxPlayers: String(lobby.maxPlayers ?? 4),
-                        currentPlayers: String(lobby.players?.length ?? lobby.currentPlayers ?? 1),
-                        isPrivate: String(Boolean(lobby.isPrivate)),
-                        status: String(lobby.status ?? 'waiting')
-                      }
-                    })
+                    activeGameId
+                      ? router.push({
+                          pathname: '/gameScreen',
+                          params: { gameId: activeGameId },
+                        })
+                      : router.push({
+                          pathname: '/main',
+                          params: {
+                            lobbyId: String(lobby.id ?? ''),
+                            lobbyCode: String(lobby.lobbyCode ?? lobby.code ?? ''),
+                            lobbyName: String(lobby.name ?? lobby.nombre ?? ''),
+                            engine: String(lobby.engine ?? lobby.modo ?? 'Classic'),
+                            maxPlayers: String(lobby.maxPlayers ?? 4),
+                            currentPlayers: String(lobby.players?.length ?? lobby.currentPlayers ?? 1),
+                            isPrivate: String(Boolean(lobby.isPrivate)),
+                            status: String(lobby.status ?? 'waiting')
+                          }
+                        })
                   }
                 >
                   <View style={styles.lobbyImage} />

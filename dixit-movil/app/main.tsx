@@ -17,6 +17,7 @@ SplashScreen.preventAutoHideAsync();
 
 export default function MainScreen() {
   const {
+    lobbyId,
     lobbyCode,
     lobbyName,
     engine,
@@ -27,6 +28,7 @@ export default function MainScreen() {
     hostId, 
     players 
   } = useLocalSearchParams<{
+    lobbyId?: string;
     lobbyCode?: string;
     lobbyName?: string;
     engine?: string;
@@ -316,16 +318,15 @@ export default function MainScreen() {
   }, [loaded, error]);
 
   useEffect(() => {
-    console.log('PARAMS MAIN:', { lobbyCode, lobbyName, engine, maxPlayers, currentPlayers, isPrivate, status, hostId, players });
-    console.log('LOBBY CODE EN MAIN:', lobbyCode);
+    console.log('PARAMS MAIN:', { lobbyId, lobbyCode, lobbyName, engine, maxPlayers, currentPlayers, isPrivate, status, hostId, players });
 
-    if (lobbyCode) {
-      fetchLobbyDetails(String(lobbyCode));
+    if (lobbyId) {
+      fetchLobbyDetails(String(lobbyId));
     } else {
       setSalaActual(null);
       setIsLoadingLobby(false);
     }
-  }, [currentPlayers, engine, hostId, isPrivate, lobbyCode, lobbyName, maxPlayers, players, status]);
+  }, [currentPlayers, engine, hostId, isPrivate, lobbyCode, lobbyId, lobbyName, maxPlayers, players, status]);
 
   if (!loaded && !error) return null;
 
