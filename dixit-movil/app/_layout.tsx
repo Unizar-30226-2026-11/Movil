@@ -1,29 +1,25 @@
 import { ActiveGameBanner } from '@/components/active-game-banner';
 import { GameSessionProvider, useGameSession } from '@/contexts/game-session-context';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { router, Stack, usePathname } from 'expo-router';
+import { Stack, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import 'react-native-reanimated';
 import { SafeAreaView, View } from 'react-native';
+import 'react-native-reanimated';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
 function RootNavigator() {
   const pathname = usePathname();
-  const { activeGameId } = useGameSession();
+  const { activeGameId, reconnectToActiveGame } = useGameSession();
+  const isPublicRoute = pathname === '/' || pathname === '/login' || pathname === '/register';
 
   return (
     <View style={{ flex: 1 }}>
-      {activeGameId && pathname !== '/gameScreen' ? (
+      {activeGameId && pathname !== '/gameScreen' && !isPublicRoute ? (
         <SafeAreaView style={{ paddingHorizontal: 12, paddingTop: 8 }}>
           <ActiveGameBanner
             subtitle="Tienes una partida en curso. Puedes volver cuando quieras."
-            onPress={() =>
-              router.push({
-                pathname: '/gameScreen',
-                params: { gameId: activeGameId },
-              })
-            }
+            onPress={() => reconnectToActiveGame()}
           />
         </SafeAreaView>
       ) : null}

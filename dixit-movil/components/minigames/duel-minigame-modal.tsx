@@ -28,6 +28,8 @@ export function DuelMinigameModal({
 
   const isParticipant =
     currentUserId === conflict.player1 || currentUserId === conflict.player2;
+  const normalizedDuration =
+    conflict.duration > 1000 ? Math.max(1, Math.ceil(conflict.duration / 1000)) : conflict.duration;
 
   const renderMinigame = () => {
     if (!isParticipant) {
@@ -55,11 +57,11 @@ export function DuelMinigameModal({
 
     switch (conflict.type) {
       case 0:
-        return <WhackMoleDuel duration={conflict.duration} onComplete={setScore} />;
+        return <WhackMoleDuel duration={normalizedDuration} onComplete={setScore} />;
       case 1:
-        return <MemoryPairsDuel duration={conflict.duration} onComplete={setScore} />;
+        return <MemoryPairsDuel duration={normalizedDuration} onComplete={setScore} />;
       case 2:
-        return <FruitBasketDuel duration={conflict.duration} onComplete={setScore} />;
+        return <FruitBasketDuel duration={normalizedDuration} onComplete={setScore} />;
       default:
         return null;
     }
@@ -71,9 +73,11 @@ export function DuelMinigameModal({
         <View style={styles.container}>
           <Text style={styles.label}>{conflict.isDuel ? 'Duelo' : 'Desempate'}</Text>
           {renderMinigame()}
-          <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-            <Text style={styles.closeButtonText}>Cerrar</Text>
-          </TouchableOpacity>
+          {!isParticipant || score !== null ? (
+            <TouchableOpacity style={styles.closeButton} onPress={onClose}>
+              <Text style={styles.closeButtonText}>{score !== null ? 'Ocultar' : 'Cerrar'}</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       </View>
     </Modal>

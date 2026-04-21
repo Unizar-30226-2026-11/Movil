@@ -1,6 +1,15 @@
 import {
-  StyleSheet, View, ImageBackground,
-  TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView, Text, ActivityIndicator, Alert
+  ActivityIndicator,
+  Alert,
+  ImageBackground,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useFonts } from 'expo-font';
@@ -8,6 +17,7 @@ import { useEffect, useState } from 'react';
 import * as SplashScreen from 'expo-splash-screen';
 import Svg, { Text as SvgText } from 'react-native-svg';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+
 import { API_URL } from '@/constants/api';
 import { useGameSession } from '@/contexts/game-session-context';
 
@@ -20,9 +30,10 @@ export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [debugStatus, setDebugStatus] = useState('Listo');
 
   const [loaded, error] = useFonts({
-    'FuenteTitulo': require('../assets/fonts/fuente-dilana.ttf'),
+    FuenteTitulo: require('../assets/fonts/fuente-dilana.ttf'),
   });
 
   useEffect(() => {
@@ -35,11 +46,13 @@ export default function LoginScreen() {
 
   const handleLogin = async () => {
     if (!email || !password) {
-      Alert.alert("Error", "Introduce tu email y contraseña.");
+      Alert.alert('Error', 'Introduce tu email y contraseña.');
       return;
     }
 
     setLoading(true);
+    setDebugStatus(`POST ${API_URL}/auth/login`);
+
     try {
       const response = await fetch(`${API_URL}/auth/login`, {
         method: 'POST',
@@ -50,15 +63,20 @@ export default function LoginScreen() {
       const data = await response.json();
 
       if (response.ok) {
+        setDebugStatus('Login OK · guardando token');
         await AsyncStorage.setItem('userToken', data.token);
+        setDebugStatus('Token guardado · refrescando sesión');
         await refreshSession();
-        router.replace('/menu'); 
+        setDebugStatus('Refresh OK · navegando a menú');
+        router.replace('/menu');
       } else {
-        Alert.alert("Error", data.message || "No se pudo iniciar sesión.");
+        setDebugStatus(`Login respondió ${response.status}`);
+        Alert.alert('Error', data.message || 'No se pudo iniciar sesión.');
       }
-    } catch (e) {
-      Alert.alert("Error de red", "No se puede conectar con el servidor.");
-      console.log(e);
+    } catch (loginError) {
+      setDebugStatus(`Fallo de red en ${API_URL}`);
+      Alert.alert('Error de red', 'No se puede conectar con el servidor.');
+      console.log(loginError);
     } finally {
       setLoading(false);
     }
@@ -67,10 +85,12 @@ export default function LoginScreen() {
   return (
     <ImageBackground source={require('../assets/images/background.jpg')} style={styles.background} resizeMode="cover">
       <View style={styles.overlay}>
-        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.keyboardContainer}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.keyboardContainer}>
           <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-
-            <TouchableOpacity style={{ height: 70, width: '100%', marginBottom: 30, justifyContent: 'center', alignItems: 'center' }} onPress={() => router.replace('/')}>
+            <TouchableOpacity
+              style={styles.titleButton}
+              onPress={() => router.replace('/')}
+            >
               <Svg height="100%" width="100%">
                 <SvgText fill="black" stroke="#FCEEB5" strokeWidth="0.8" fontSize="42" fontFamily="FuenteTitulo" x="50%" y="55%" textAnchor="middle">
                   A Tale Of Recognition
@@ -79,6 +99,13 @@ export default function LoginScreen() {
             </TouchableOpacity>
 
             <View style={styles.formContainer}>
+              <View style={styles.debugBox}>
+                <Text style={styles.debugLabel}>API</Text>
+                <Text style={styles.debugText}>{API_URL}</Text>
+                <Text style={styles.debugLabel}>Estado</Text>
+                <Text style={styles.debugText}>{debugStatus}</Text>
+              </View>
+
               <TextInput
                 style={styles.input}
                 placeholder="Correo electrónico"
@@ -88,11 +115,12 @@ export default function LoginScreen() {
                 value={email}
                 onChangeText={setEmail}
               />
+
               <TextInput
                 style={styles.input}
                 placeholder="Contraseña"
                 placeholderTextColor="#6b6b6b"
-                secureTextEntry={true}
+                secureTextEntry
                 value={password}
                 onChangeText={setPassword}
               />
@@ -101,14 +129,12 @@ export default function LoginScreen() {
                 {loading ? <ActivityIndicator color="#2c3e50" /> : <Text style={styles.loginButtonText}>Entrar</Text>}
               </TouchableOpacity>
             </View>
-
           </ScrollView>
         </KeyboardAvoidingView>
 
         <TouchableOpacity style={styles.registerButtonCorner} onPress={() => router.push('/register')}>
           <Text style={styles.registerButtonCornerText}>No tengo cuenta</Text>
         </TouchableOpacity>
-
       </View>
     </ImageBackground>
   );
@@ -119,10 +145,79 @@ const styles = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)' },
   keyboardContainer: { flex: 1 },
   scrollContent: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 50 },
+  titleButton: {
+    height: 70,
+    width: '100%',
+    marginBottom: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   formContainer: { width: '85%', alignItems: 'center', gap: 20 },
-  input: { width: '100%', backgroundColor: '#FCEEB5', paddingVertical: 15, paddingHorizontal: 20, borderRadius: 10, fontSize: 16, borderWidth: 1, borderColor: '#d4c494', shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 3.84, elevation: 3 },
-  loginButton: { marginTop: 20, backgroundColor: '#A8C8C0', paddingVertical: 15, paddingHorizontal: 40, borderRadius: 25, borderWidth: 2, borderColor: '#8caea6', shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 4.65, elevation: 8 },
+  debugBox: {
+    width: '100%',
+    backgroundColor: 'rgba(12, 28, 40, 0.82)',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(252, 238, 181, 0.25)',
+    gap: 4,
+  },
+  debugLabel: {
+    color: '#8caea6',
+    fontSize: 11,
+    fontWeight: 'bold',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
+  debugText: {
+    color: '#FCEEB5',
+    fontSize: 12,
+  },
+  input: {
+    width: '100%',
+    backgroundColor: '#FCEEB5',
+    paddingVertical: 15,
+    paddingHorizontal: 20,
+    borderRadius: 10,
+    fontSize: 16,
+    borderWidth: 1,
+    borderColor: '#d4c494',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3.84,
+    elevation: 3,
+  },
+  loginButton: {
+    marginTop: 20,
+    backgroundColor: '#A8C8C0',
+    paddingVertical: 15,
+    paddingHorizontal: 40,
+    borderRadius: 25,
+    borderWidth: 2,
+    borderColor: '#8caea6',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4.65,
+    elevation: 8,
+  },
   loginButtonText: { fontSize: 18, fontWeight: 'bold', color: '#2c3e50' },
-  registerButtonCorner: { position: 'absolute', bottom: 30, right: 20, backgroundColor: '#A8C8C0', paddingVertical: 12, paddingHorizontal: 25, borderRadius: 20, borderWidth: 1, borderColor: '#8caea6', shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 3.84, elevation: 5 },
+  registerButtonCorner: {
+    position: 'absolute',
+    bottom: 30,
+    right: 20,
+    backgroundColor: '#A8C8C0',
+    paddingVertical: 12,
+    paddingHorizontal: 25,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#8caea6',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
   registerButtonCornerText: { fontSize: 14, fontWeight: '600', color: '#2c3e50' },
 });

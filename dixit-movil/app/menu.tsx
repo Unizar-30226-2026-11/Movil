@@ -34,7 +34,7 @@ export default function MenuScreen() {
   const [createLobbyVisible, setCreateLobbyVisible] = useState(false);
   const [lobbyName, setLobbyName] = useState('');
   const [lobbyPlayers, setLobbyPlayers] = useState('4');
-  const [lobbyEngine, setLobbyEngine] = useState('Classic');
+  const [lobbyEngine, setLobbyEngine] = useState<'Classic' | 'Stella'>('Classic');
   const [isPrivateLobby, setIsPrivateLobby] = useState(false);
   const [lobbies, setLobbies] = useState<any[]>([]);
   const [isLoadingLobbies, setIsLoadingLobbies] = useState(true);
@@ -206,16 +206,8 @@ export default function MenuScreen() {
       router.push({
         pathname: '/main',
         params: {
-          lobbyId: String(nuevaSala.id ?? nuevaSala._id ?? ''),
           lobbyCode: String(nuevaSala.lobbyCode ?? nuevaSala.code ?? ''),
-          lobbyName: String(nuevaSala.name ?? lobbyName),
-          engine: String(nuevaSala.engine ?? lobbyEngine),
-          maxPlayers: String(nuevaSala.maxPlayers ?? lobbyPlayers),
-          currentPlayers: '1', 
-          isPrivate: String(Boolean(isPrivateLobby)),
-          status: 'waiting',
-          hostId: String(nuevaSala.hostId ?? ''),
-          players: JSON.stringify(nuevaSala.players ?? []) 
+          autoJoin: '1',
         }
       });
 
@@ -304,14 +296,23 @@ export default function MenuScreen() {
               <Text style={styles.lobbiesSubtitle}>{lobbies.length} resultados</Text>
             </View>
 
-            <TouchableOpacity
-              style={styles.createLobbyButton}
-              onPress={() => setCreateLobbyVisible(!createLobbyVisible)}
-            >
-              <Text style={styles.createLobbyButtonText}>
-                {createLobbyVisible ? 'Cerrar' : 'Crear lobby'}
-              </Text>
-            </TouchableOpacity>
+            <View style={styles.headerActions}>
+              <TouchableOpacity
+                style={styles.secondaryLobbyButton}
+                onPress={() => router.push('/main')}
+              >
+                <Text style={styles.secondaryLobbyButtonText}>Unirse por código</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.createLobbyButton}
+                onPress={() => setCreateLobbyVisible(!createLobbyVisible)}
+              >
+                <Text style={styles.createLobbyButtonText}>
+                  {createLobbyVisible ? 'Cerrar' : 'Crear lobby'}
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           {createLobbyVisible && (
@@ -343,10 +344,28 @@ export default function MenuScreen() {
                 <TextInput
                   style={styles.lobbyInput}
                   value={lobbyEngine}
-                  onChangeText={setLobbyEngine}
-                  placeholder="Classic"
                   placeholderTextColor="#6b6b6b"
+                  editable={false}
                 />
+              </View>
+
+              <View style={styles.engineOptionsRow}>
+                <TouchableOpacity
+                  style={[styles.engineOption, lobbyEngine === 'Classic' && styles.engineOptionActive]}
+                  onPress={() => setLobbyEngine('Classic')}
+                >
+                  <Text style={[styles.engineOptionText, lobbyEngine === 'Classic' && styles.engineOptionTextActive]}>
+                    Classic
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.engineOption, lobbyEngine === 'Stella' && styles.engineOptionActive]}
+                  onPress={() => setLobbyEngine('Stella')}
+                >
+                  <Text style={[styles.engineOptionText, lobbyEngine === 'Stella' && styles.engineOptionTextActive]}>
+                    Stella
+                  </Text>
+                </TouchableOpacity>
               </View>
 
               <TouchableOpacity
@@ -393,9 +412,9 @@ export default function MenuScreen() {
                             lobbyId: String(lobby.id ?? ''),
                             lobbyCode: String(lobby.lobbyCode ?? lobby.code ?? ''),
                             lobbyName: String(lobby.name ?? lobby.nombre ?? ''),
-                            engine: String(lobby.engine ?? lobby.modo ?? 'Classic'),
+                            engine: String(lobby.engine ?? lobby.modo ?? 'STANDARD'),
                             maxPlayers: String(lobby.maxPlayers ?? 4),
-                            currentPlayers: String(lobby.players?.length ?? lobby.currentPlayers ?? 1),
+                            currentPlayers: String(lobby.players?.length ?? lobby.currentPlayers ?? 0),
                             isPrivate: String(Boolean(lobby.isPrivate)),
                             status: String(lobby.status ?? 'waiting')
                           }
@@ -498,6 +517,11 @@ lobbiesHeader: {
   marginBottom: 18,
 },
 
+headerActions: {
+  gap: 10,
+  alignItems: 'flex-end',
+},
+
 lobbiesTitle: {
   fontSize: 28,
   fontWeight: 'bold',
@@ -515,6 +539,20 @@ createLobbyButton: {
   paddingHorizontal: 18,
   paddingVertical: 10,
   borderRadius: 20,
+},
+
+secondaryLobbyButton: {
+  backgroundColor: 'rgba(255,255,255,0.78)',
+  paddingHorizontal: 18,
+  paddingVertical: 10,
+  borderRadius: 20,
+  borderWidth: 1,
+  borderColor: 'rgba(10, 25, 40, 0.2)',
+},
+
+secondaryLobbyButtonText: {
+  color: '#0f2027',
+  fontWeight: 'bold',
 },
 
 createLobbyButtonText: {
@@ -576,6 +614,35 @@ checkboxActive: {
 privateText: {
   color: '#2c3e50',
   fontSize: 14,
+},
+
+engineOptionsRow: {
+  flexDirection: 'row',
+  gap: 10,
+},
+
+engineOption: {
+  flex: 1,
+  borderRadius: 12,
+  paddingVertical: 10,
+  alignItems: 'center',
+  backgroundColor: '#ffffff',
+  borderWidth: 1,
+  borderColor: '#d4d4d4',
+},
+
+engineOptionActive: {
+  backgroundColor: '#FCEEB5',
+  borderColor: '#d4c494',
+},
+
+engineOptionText: {
+  color: '#2c3e50',
+  fontWeight: '600',
+},
+
+engineOptionTextActive: {
+  fontWeight: 'bold',
 },
 
 createAndJoinButton: {
