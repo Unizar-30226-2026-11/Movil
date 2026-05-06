@@ -1,4 +1,3 @@
-```markdown
 # Mobile Frontend - A Tale Of Recognition
 
 Frontend development for the Mobile application.
@@ -68,4 +67,3 @@ For more information on using Expo and React Native, visit:
 * [Expo Documentation](https://docs.expo.dev/)
 * [React Native Directory](https://reactnative.directory/)
 * [Expo Router Reference](https://docs.expo.dev/router/introduction/)
-```
