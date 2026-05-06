@@ -1,5 +1,3 @@
-Ah, perdona, tienes toda la razón. Aquí lo tienes todo en un solo bloque listo para copiar y pegar directamente en tu archivo `README.md`:
-
 ```markdown
 # Mobile Frontend - A Tale Of Recognition
 
