@@ -13,7 +13,7 @@ import {
   Modal
 } from 'react-native';
 import { useFonts } from 'expo-font';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import * as SplashScreen from 'expo-splash-screen';
 import Svg, { Text as SvgText } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
@@ -40,7 +40,11 @@ type OwnedCardOption = {
 };
 
 const PRIMARY_DECK_NAME = 'Mazo principal';
-const DECK_MIN_CARDS = 1;
+const DECK_MIN_CARDS = 16;
+const DISMISSED_ACTIVE_LOBBY_STORAGE_KEY = 'dismissedActiveLobbyCode';
+const EASTER_EGG_TAPS = 20;
+const EASTER_EGG_MESSAGE =
+  'Enhorabuena, has descubierto nuestro único easter egg. Dale las gracias a Sergio Guerra y Mohamed Rayen, desarrolladores del frontend movil de este juego.';
 
 const normalizeCardId = (value: unknown) => {
   const raw = String(value ?? '').trim();
@@ -54,6 +58,21 @@ const normalizeDeckId = (value: unknown) => {
   return raw.startsWith('d_') ? raw : `d_${raw.replace(/^d_/i, '')}`;
 };
 
+const formatCollectionSegment = (value: string) => {
+  const decoded = decodeURIComponent(value).replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return decoded || 'Sin coleccion';
+};
+
+const inferCollectionNameFromUrl = (url: unknown) => {
+  if (typeof url !== 'string' || !url.trim()) return '';
+
+  const match = url.match(/\/cards\/([^/?#]+)/i);
+  return match?.[1] ? formatCollectionSegment(match[1]) : '';
+};
+
+const isGenericSeedCollectionName = (value: unknown) =>
+  /^Colecci(?:o|ó)n\s+\d+$/i.test(String(value ?? '').trim());
+
 const inferCollectionNameFromCard = (card: any) => {
   const directCollection =
     card.collectionName ??
@@ -66,9 +85,21 @@ const inferCollectionNameFromCard = (card: any) => {
     return directCollection.trim();
   }
 
+  const urlCollection = inferCollectionNameFromUrl(card.url_image ?? card.imageUrl ?? card.url);
+  if (urlCollection) return urlCollection;
+
   const name = String(card.name ?? card.title ?? '');
   const [prefix] = name.split(' - ');
   return prefix && prefix !== name ? prefix.trim() : 'Sin coleccion';
+};
+
+const resolveCardCollectionName = (card: any, mappedCollectionName?: string) => {
+  const inferredCollectionName = inferCollectionNameFromCard(card);
+  if (!mappedCollectionName || isGenericSeedCollectionName(mappedCollectionName)) {
+    return inferredCollectionName;
+  }
+
+  return mappedCollectionName;
 };
 
 const dedupeCardsById = (cards: OwnedCardOption[]) => {
@@ -87,6 +118,14 @@ const uniqueCardIds = (cardIds: string[]) => Array.from(new Set(cardIds.filter(B
 const normalizeLobbyMode = (value: unknown) => {
   const mode = String(value ?? 'Classic').toUpperCase();
   return mode.includes('STELLA') ? 'Stella' : 'Classic';
+};
+
+const getLobbyCode = (lobby: any) => String(lobby?.lobbyCode ?? lobby?.code ?? '');
+
+const isLobbyVisible = (lobby: any) => {
+  const hostId = String(lobby?.hostId ?? lobby?.host_id ?? '');
+  const players = Array.isArray(lobby?.players) ? lobby.players.map(String) : [];
+  return !hostId || players.includes(hostId);
 };
 
 export default function MenuScreen() {
@@ -116,6 +155,28 @@ export default function MenuScreen() {
   const [selectedDeckCardIds, setSelectedDeckCardIds] = useState<string[]>([]);
   const [selectedCollectionName, setSelectedCollectionName] = useState('Todas');
   const [isSavingDeck, setIsSavingDeck] = useState(false);
+  const [activeSessionLobbyDetails, setActiveSessionLobbyDetails] = useState<any | null>(null);
+  const [easterEggVisible, setEasterEggVisible] = useState(false);
+  const dismissActiveGameRef = useRef(dismissActiveGame);
+  const easterEggTapCountRef = useRef(0);
+
+  useEffect(() => {
+    dismissActiveGameRef.current = dismissActiveGame;
+  }, [dismissActiveGame]);
+
+  const handleCoinPress = () => {
+    easterEggTapCountRef.current += 1;
+
+    if (easterEggTapCountRef.current >= EASTER_EGG_TAPS) {
+      easterEggTapCountRef.current = 0;
+      setEasterEggVisible(true);
+    }
+  };
+
+  const closeEasterEgg = () => {
+    setEasterEggVisible(false);
+    easterEggTapCountRef.current = 0;
+  };
 
   const fetchUserProfile = async () => {
     try {
@@ -220,7 +281,12 @@ export default function MenuScreen() {
               ? data.data
               : [];
 
-      setLobbies(rawLobbies);
+      const dismissedLobbyCode = await AsyncStorage.getItem(DISMISSED_ACTIVE_LOBBY_STORAGE_KEY);
+      setLobbies(
+        rawLobbies.filter((lobby) =>
+          isLobbyVisible(lobby) && (!dismissedLobbyCode || getLobbyCode(lobby) !== dismissedLobbyCode)
+        )
+      );
     } catch (error) {
       console.log('Error cargando lobbies:', error);
       setLobbies([]);
@@ -368,6 +434,46 @@ export default function MenuScreen() {
     }
   };
 
+  const fetchLobbyByCode = useCallback(async (lobbyCode: string) => {
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      if (!token) return null;
+
+      const response = await fetch(`${API_URL}/lobbies/${lobbyCode}?t=${Date.now()}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Cache-Control': 'no-cache',
+        },
+      });
+
+      const data = await response.json();
+      if (!response.ok) return null;
+      return data.lobby ?? data.room ?? data;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const handleCloseActiveSession = async () => {
+    if (!activeGameId) return;
+
+    const localLobby = lobbies.find((item) => getLobbyCode(item) === activeGameId);
+    const lobby = localLobby ?? (await fetchLobbyByCode(activeGameId));
+    const hostId = String(lobby?.hostId ?? lobby?.host_id ?? '');
+    const status = String(lobby?.status ?? '');
+    const isHost = Boolean(currentUserId && hostId && hostId === currentUserId);
+
+    if (isHost && status !== 'waiting') {
+      await closeActiveGame(activeGameId);
+    } else {
+      await dismissActiveGame(activeGameId);
+    }
+
+    setLobbies((previous) => previous.filter((item) => getLobbyCode(item) !== activeGameId));
+    setActiveSessionLobbyDetails(null);
+    await fetchLobbies();
+  };
+
   const fetchDecks = async () => {
     try {
       const token = await AsyncStorage.getItem('userToken');
@@ -421,7 +527,7 @@ export default function MenuScreen() {
             name: String(card.name ?? card.title ?? 'Carta sin nombre'),
             quantity: 1,
             url_image: typeof card.url_image === 'string' && card.url_image.trim().length > 0 ? card.url_image : null,
-            collectionName: collectionMap.get(cardId) ?? inferCollectionNameFromCard(card),
+            collectionName: resolveCardCollectionName(card, collectionMap.get(cardId)),
           };
         }).filter((card: OwnedCardOption) => card.cardId);
 
@@ -462,7 +568,7 @@ export default function MenuScreen() {
       const uniqueSelectedCardIds = uniqueCardIds(selectedDeckCardIds);
 
       if (uniqueSelectedCardIds.length < DECK_MIN_CARDS) {
-        Alert.alert('Error', 'Selecciona al menos una carta');
+        Alert.alert('Error', `Selecciona al menos ${DECK_MIN_CARDS} cartas`);
         return;
       }
 
@@ -523,9 +629,42 @@ export default function MenuScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      easterEggTapCountRef.current = 0;
+      setEasterEggVisible(false);
       void fetchLobbies();
     }, [fetchLobbies])
   );
+
+  useEffect(() => {
+    if (!activeGameId) {
+      setActiveSessionLobbyDetails(null);
+      return;
+    }
+
+    let isCancelled = false;
+
+    const validateActiveSession = async () => {
+      const lobby = await fetchLobbyByCode(activeGameId);
+      if (isCancelled) return;
+
+      if (!lobby || !isLobbyVisible(lobby)) {
+        await dismissActiveGameRef.current(activeGameId);
+        if (!isCancelled) {
+          setActiveSessionLobbyDetails(null);
+          setLobbies((previous) => previous.filter((item) => getLobbyCode(item) !== activeGameId));
+        }
+        return;
+      }
+
+      setActiveSessionLobbyDetails(lobby);
+    };
+
+    void validateActiveSession();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [activeGameId, fetchLobbyByCode]);
 
   useEffect(() => {
     if (loaded || error) {
@@ -540,6 +679,14 @@ export default function MenuScreen() {
     ? ownedCards
     : ownedCards.filter(card => card.collectionName === selectedCollectionName);
   const deckMaxCards = ownedCards.length;
+  const activeSessionLobby = activeGameId
+    ? lobbies.find((lobby) => getLobbyCode(lobby) === activeGameId) ?? activeSessionLobbyDetails
+    : null;
+  const isActiveSessionHost = Boolean(
+    activeSessionLobby &&
+      currentUserId &&
+      String(activeSessionLobby.hostId ?? activeSessionLobby.host_id ?? '') === currentUserId
+  );
   const canSaveDeck =
     selectedDeckCardIds.length >= DECK_MIN_CARDS &&
     selectedDeckCardIds.length <= Math.max(deckMaxCards, DECK_MIN_CARDS) &&
@@ -595,21 +742,21 @@ export default function MenuScreen() {
                   <Ionicons name="person" size={18} color="#FCEEB5" />
                   <Text style={styles.userBannerText}>Hola, {username}</Text>
                 </View>
-                <View style={styles.userInfoRight}>
+                <TouchableOpacity style={styles.userInfoRight} activeOpacity={1} onPress={handleCoinPress}>
                   <Text style={styles.userCoinsText}>{coins}</Text>
                   <Ionicons name="cash" size={20} color="#FFD700" />
-                </View>
+                </TouchableOpacity>
               </>
             )}
           </View>
 
           <View style={styles.content}>
-          {activeGameId ? (
+          {activeGameId && activeSessionLobby ? (
             <View style={styles.activeSessionPanel}>
               <View style={styles.activeSessionTextGroup}>
                 <Text style={styles.activeSessionTitle}>Sesion activa detectada</Text>
                 <Text style={styles.activeSessionSubtitle}>
-                  Codigo {activeGameId}. Puedes volver a la partida o cerrarla si ya no debe seguir activa.
+                  Codigo {activeGameId}. Puedes volver o {isActiveSessionHost ? 'cerrarla' : 'salir'} si ya no debe seguir activa.
                 </Text>
               </View>
               <View style={styles.activeSessionActions}>
@@ -620,20 +767,22 @@ export default function MenuScreen() {
                   style={styles.closeGameButton}
                   onPress={() =>
                     Alert.alert(
-                      'Cerrar partida',
-                      'Se intentara cerrar la partida en el servidor y salir de la sala.',
+                      isActiveSessionHost ? 'Cerrar partida' : 'Salir de la partida',
+                      isActiveSessionHost
+                        ? 'Se cerrara la partida para todos los jugadores.'
+                        : 'Saldras de esta partida y dejara de aparecerte.',
                       [
                         { text: 'Cancelar', style: 'cancel' },
                         {
-                          text: 'Cerrar',
+                          text: isActiveSessionHost ? 'Cerrar' : 'Salir',
                           style: 'destructive',
-                          onPress: () => void closeActiveGame(activeGameId),
+                          onPress: () => void handleCloseActiveSession(),
                         },
                       ],
                     )
                   }
                 >
-                  <Text style={styles.closeGameButtonText}>Cerrar</Text>
+                  <Text style={styles.closeGameButtonText}>{isActiveSessionHost ? 'Cerrar' : 'Salir'}</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -699,16 +848,7 @@ export default function MenuScreen() {
                 />
               </View>
 
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Modo</Text>
-                <TextInput
-                  style={styles.lobbyInput}
-                  value={lobbyEngine}
-                  placeholderTextColor="#6b6b6b"
-                  editable={false}
-                />
-              </View>
-
+              <Text style={styles.inputLabel}>Modo</Text>
               <View style={styles.engineOptionsRow}>
                 <TouchableOpacity
                   style={[styles.engineOption, lobbyEngine === 'Classic' && styles.engineOptionActive]}
@@ -921,7 +1061,6 @@ export default function MenuScreen() {
                               <Text style={styles.deckCardPlaceholderText}>{card.cardId.replace('c_', '')}</Text>
                             </View>
                           )}
-                          <Text numberOfLines={2} style={styles.deckCardName}>{card.name}</Text>
                           {isSelectedCard && (
                             <View style={styles.deckCardCheck}>
                               <Ionicons name="checkmark" size={14} color="#10212e" />
@@ -946,6 +1085,14 @@ export default function MenuScreen() {
                 </TouchableOpacity>
               </View>
             </View>
+          </Modal>
+
+          <Modal visible={easterEggVisible} transparent animationType="fade" onRequestClose={closeEasterEgg}>
+            <TouchableOpacity style={styles.easterEggOverlay} activeOpacity={1} onPress={closeEasterEgg}>
+              <View style={styles.easterEggBox}>
+                <Text style={styles.easterEggText}>{EASTER_EGG_MESSAGE}</Text>
+              </View>
+            </TouchableOpacity>
           </Modal>
 
           <SocialPanel visible={socialVisible} onClose={() => setSocialVisible(false)} />
@@ -1352,7 +1499,7 @@ deckLoadingBox: {
 
 deckCardOption: {
   width: '31%',
-  minHeight: 158,
+  minHeight: 130,
   borderRadius: 12,
   backgroundColor: 'rgba(255,255,255,0.08)',
   borderWidth: 1,
@@ -1711,5 +1858,29 @@ emptyLobbiesText: {
   color: '#2c3e50',
   textAlign: 'center',
   marginTop: 30,
+},
+
+easterEggOverlay: {
+  flex: 1,
+  backgroundColor: 'rgba(4, 12, 18, 0.72)',
+  alignItems: 'center',
+  justifyContent: 'center',
+  padding: 28,
+},
+
+easterEggBox: {
+  backgroundColor: 'rgba(10, 25, 40, 0.96)',
+  borderRadius: 18,
+  borderWidth: 1,
+  borderColor: '#FCEEB5',
+  padding: 22,
+},
+
+easterEggText: {
+  color: '#FCEEB5',
+  fontSize: 17,
+  lineHeight: 24,
+  textAlign: 'center',
+  fontWeight: '700',
 },
 });

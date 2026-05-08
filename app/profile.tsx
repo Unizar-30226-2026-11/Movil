@@ -39,6 +39,21 @@ const PRESENCE_OPTIONS: { value: PresenceStatus; label: string; icon: keyof type
 const getPresenceLabel = (status: string) =>
   PRESENCE_OPTIONS.find(option => option.value === status)?.label ?? 'Desconocido';
 
+const formatCollectionSegment = (value: string) => {
+  const decoded = decodeURIComponent(value).replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return decoded || 'Sin coleccion';
+};
+
+const inferCollectionNameFromUrl = (url: unknown) => {
+  if (typeof url !== 'string' || !url.trim()) return '';
+
+  const match = url.match(/\/cards\/([^/?#]+)/i);
+  return match?.[1] ? formatCollectionSegment(match[1]) : '';
+};
+
+const isGenericSeedCollectionName = (value: unknown) =>
+  /^Colecci(?:o|ó)n\s+\d+$/i.test(String(value ?? '').trim());
+
 const dedupeCardsById = (cards: OwnedCard[]) => {
   const uniqueCards = new Map<string, OwnedCard>();
 
@@ -92,9 +107,21 @@ export default function ProfileScreen() {
       return directCollection.trim();
     }
 
+    const urlCollection = inferCollectionNameFromUrl(card.url_image ?? card.imageUrl ?? card.url);
+    if (urlCollection) return urlCollection;
+
     const name = String(card.name ?? card.title ?? '');
     const [prefix] = name.split(' - ');
     return prefix && prefix !== name ? prefix.trim() : 'Sin coleccion';
+  };
+
+  const resolveCardCollectionName = (card: any, mappedCollectionName?: string) => {
+    const inferredCollectionName = inferCollectionNameFromCard(card);
+    if (!mappedCollectionName || isGenericSeedCollectionName(mappedCollectionName)) {
+      return inferredCollectionName;
+    }
+
+    return mappedCollectionName;
   };
 
   const fetchProfile = async () => {
@@ -233,7 +260,10 @@ export default function ProfileScreen() {
           quantity: 1,
           rarity: String(carta.rarity ?? 'COMMON'),
           url_image: typeof carta.url_image === 'string' && carta.url_image.trim().length > 0 ? carta.url_image : null,
-          collectionName: collectionMap.get(String(carta.cardId ?? carta.id ?? carta.id_card)) ?? inferCollectionNameFromCard(carta),
+          collectionName: resolveCardCollectionName(
+            carta,
+            collectionMap.get(String(carta.cardId ?? carta.id ?? carta.id_card)),
+          ),
         }));
         const uniqueCards = dedupeCardsById(cards);
 
@@ -580,9 +610,6 @@ export default function ProfileScreen() {
                           </View>
                         )}
                       </View>
-                      <Text style={styles.cardName} numberOfLines={2}>{card.name}</Text>
-                      <Text style={styles.cardMeta} numberOfLines={1}>{card.collectionName}</Text>
-                      <Text style={styles.cardRarity}>{card.rarity}</Text>
                     </View>
                   ))}
                 </ScrollView>
@@ -862,7 +889,7 @@ const styles = StyleSheet.create({
   boardsGrid: { gap: 12, paddingBottom: 8 },
   cardItem: {
     width: '31%',
-    minHeight: 158,
+    minHeight: 130,
     backgroundColor: 'rgba(255,255,255,0.08)',
     borderRadius: 12,
     padding: 7,

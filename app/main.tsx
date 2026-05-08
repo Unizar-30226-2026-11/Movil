@@ -64,6 +64,7 @@ export default function MainScreen() {
   const {
     connectToLobbySession,
     currentLobbyCode,
+    dismissActiveGame,
     isSocketConnected,
     latestLobbyNotice,
     leaveLobbySession,
@@ -89,6 +90,7 @@ export default function MainScreen() {
   const [isUpdatingBoard, setIsUpdatingBoard] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatText, setChatText] = useState('');
+  const [useDynamicPool, setUseDynamicPool] = useState(true);
 
   useEffect(() => {
     if (loaded || error) SplashScreen.hideAsync();
@@ -265,7 +267,7 @@ export default function MainScreen() {
           text: 'Cerrar',
           style: 'destructive',
           onPress: () => {
-            leaveLobbySession();
+            void dismissActiveGame(lobbyCode);
             router.replace('/menu');
           },
         },
@@ -308,7 +310,7 @@ export default function MainScreen() {
       return;
     }
 
-    startLobbyGame();
+    startLobbyGame(useDynamicPool);
   };
 
   const handleJoinByCode = async () => {
@@ -518,9 +520,9 @@ export default function MainScreen() {
                   ))}
                 </View>
 
-                {isHost && isJoined && visibleLobby.status === 'waiting' ? (
+                {visibleLobby.status === 'waiting' ? (
                   <View style={styles.boardSection}>
-                    <Text style={styles.boardSectionTitle}>Tablero de la partida</Text>
+                    <Text style={styles.boardSectionTitle}>Tu tablero</Text>
                     {ownedBoards.find((board) => board.id === selectedBoardId)?.url_image ? (
                       <ImageBackground
                         source={{ uri: ownedBoards.find((board) => board.id === selectedBoardId)?.url_image }}
@@ -586,6 +588,19 @@ export default function MainScreen() {
                   <View style={styles.lobbyActions}>
                     {isHost ? (
                       <>
+                        <TouchableOpacity
+                          style={[styles.dynamicPoolButton, useDynamicPool && styles.dynamicPoolButtonActive]}
+                          onPress={() => setUseDynamicPool((previous) => !previous)}
+                        >
+                          <Ionicons
+                            name={useDynamicPool ? 'layers-outline' : 'albums-outline'}
+                            size={18}
+                            color={useDynamicPool ? '#2c3e50' : '#FCEEB5'}
+                          />
+                          <Text style={[styles.dynamicPoolButtonText, useDynamicPool && styles.dynamicPoolButtonTextActive]}>
+                            {useDynamicPool ? 'Mazo dinamico: si' : 'Mazo dinamico: no'}
+                          </Text>
+                        </TouchableOpacity>
                         <TouchableOpacity style={styles.primaryButton} onPress={() => void handleStartVisibleLobby()}>
                           <Text style={styles.primaryButtonText}>Iniciar partida</Text>
                         </TouchableOpacity>
@@ -958,6 +973,30 @@ const styles = StyleSheet.create({
   },
   lobbyActions: {
     gap: 10,
+  },
+  dynamicPoolButton: {
+    backgroundColor: '#142637',
+    paddingVertical: 13,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(252, 238, 181, 0.28)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  dynamicPoolButtonActive: {
+    backgroundColor: '#FCEEB5',
+    borderColor: '#FCEEB5',
+  },
+  dynamicPoolButtonText: {
+    color: '#FCEEB5',
+    fontWeight: 'bold',
+    fontSize: 15,
+  },
+  dynamicPoolButtonTextActive: {
+    color: '#2c3e50',
   },
   joinedPill: {
     backgroundColor: 'rgba(44, 62, 80, 0.08)',

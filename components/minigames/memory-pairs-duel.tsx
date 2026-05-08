@@ -11,7 +11,15 @@ type CardItem = {
   value: string;
 };
 
-const BASE_VALUES = ['🍎', '🍐', '🍒', '🍊', '🍇', '🍉'];
+const BASE_VALUES = [
+  '\u{1F34E}',
+  '\u{1F350}',
+  '\u{1F34A}',
+  '\u{1F347}',
+  '\u{1F349}',
+  '\u{1F34C}',
+  '\u{1F353}',
+];
 
 export function MemoryPairsDuel({ duration, onComplete }: MemoryPairsDuelProps) {
   const deck = useMemo<CardItem[]>(
@@ -122,7 +130,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   skyPanel: {
-    minHeight: 350,
+    minHeight: 390,
     borderRadius: 24,
     padding: 14,
     borderWidth: 1,
@@ -145,9 +153,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   card: {
-    width: 74,
-    height: 92,
-    borderRadius: 18,
+    width: 68,
+    height: 82,
+    borderRadius: 16,
     backgroundColor: 'rgba(24, 44, 72, 0.78)',
     justifyContent: 'center',
     alignItems: 'center',

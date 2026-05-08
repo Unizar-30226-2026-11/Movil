@@ -1,9 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useFonts } from 'expo-font';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -53,6 +53,10 @@ const ITEM_TYPE_LABELS: Record<StoreItemType, string> = {
   pack: 'Pack diario',
   unknown: 'Oferta',
 };
+
+const EASTER_EGG_TAPS = 20;
+const EASTER_EGG_MESSAGE =
+  'Enhorabuena, has descubierto nuestro único easter egg. Dale las gracias a Sergio Guerra y Mohamed Rayen, desarrolladores del frontend movil de este juego.';
 
 const normalizeAssetId = (value: unknown, prefix?: 'c' | 'b' | 'col') => {
   const raw = String(value ?? '').trim();
@@ -331,17 +335,40 @@ export default function StoreScreen() {
     boardIds: new Set(),
     collectionIds: new Set(),
   });
+  const [easterEggVisible, setEasterEggVisible] = useState(false);
+  const easterEggTapCountRef = useRef(0);
 
   const normalizedProducts = useMemo(
     () => productos.map((producto, index) => normalizeShopItem(producto, index, ownership)),
     [ownership, productos]
   );
 
+  const handleCoinPress = () => {
+    easterEggTapCountRef.current += 1;
+
+    if (easterEggTapCountRef.current >= EASTER_EGG_TAPS) {
+      easterEggTapCountRef.current = 0;
+      setEasterEggVisible(true);
+    }
+  };
+
+  const closeEasterEgg = () => {
+    setEasterEggVisible(false);
+    easterEggTapCountRef.current = 0;
+  };
+
   useEffect(() => {
     if (loaded || error) {
       SplashScreen.hideAsync();
     }
   }, [loaded, error]);
+
+  useFocusEffect(
+    useCallback(() => {
+      easterEggTapCountRef.current = 0;
+      setEasterEggVisible(false);
+    }, [])
+  );
 
   useEffect(() => {
     fetchShopItems();
@@ -579,10 +606,10 @@ export default function StoreScreen() {
           </TouchableOpacity>
 
           <View style={styles.headerIcons}>
-            <View style={styles.coinsContainer}>
+            <TouchableOpacity style={styles.coinsContainer} activeOpacity={1} onPress={handleCoinPress}>
               <Text style={styles.coinsText}>{coins}</Text>
               <Ionicons name="cash" size={18} color="#FFD700" />
-            </View>
+            </TouchableOpacity>
 
             <TouchableOpacity onPress={() => router.push('/profile')} style={styles.iconButton}>
               <Ionicons name="settings-outline" size={26} color="#FCEEB5" />
@@ -691,6 +718,14 @@ export default function StoreScreen() {
               </View>
             </View>
           </View>
+        </Modal>
+
+        <Modal visible={easterEggVisible} transparent animationType="fade" onRequestClose={closeEasterEgg}>
+          <TouchableOpacity style={styles.easterEggOverlay} activeOpacity={1} onPress={closeEasterEgg}>
+            <View style={styles.easterEggBox}>
+              <Text style={styles.easterEggText}>{EASTER_EGG_MESSAGE}</Text>
+            </View>
+          </TouchableOpacity>
         </Modal>
       </SafeAreaView>
     </ImageBackground>
@@ -916,5 +951,26 @@ const styles = StyleSheet.create({
   confirmButtonText: {
     color: 'white',
     fontWeight: 'bold',
+  },
+  easterEggOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(4, 12, 18, 0.72)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 28,
+  },
+  easterEggBox: {
+    backgroundColor: 'rgba(10, 25, 40, 0.96)',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#FCEEB5',
+    padding: 22,
+  },
+  easterEggText: {
+    color: '#FCEEB5',
+    fontSize: 17,
+    lineHeight: 24,
+    textAlign: 'center',
+    fontWeight: '700',
   },
 });

@@ -37,7 +37,10 @@ type HandCard = {
 type BoardCard = {
   id: number;
   url_image: string | null;
+  playerId?: string;
 };
+
+type PrivateHandItem = number | Record<string, any>;
 
 type StellaMarks = Record<string, number[]>;
 type StellaRoundScores = Record<string, number>;
@@ -51,6 +54,66 @@ const FALLBACK_BOARD = Array.from({ length: 42 }, (_, index) => ({
 }));
 
 const normalizeCardId = (value: string | number) => Number(String(value).replace(/\D/g, ''));
+
+const getImageUrl = (value: unknown) =>
+  typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+
+const getPrivateHandItemImageUrl = (item: PrivateHandItem) => {
+  if (typeof item === 'number') return null;
+
+  return (
+    getImageUrl(item.url_image) ??
+    getImageUrl(item.imageUrl) ??
+    getImageUrl(item.image_url) ??
+    getImageUrl(item.url) ??
+    getImageUrl(item.board?.url_image) ??
+    getImageUrl(item.board?.imageUrl) ??
+    null
+  );
+};
+
+const isPrivateHandBoardItem = (item: PrivateHandItem) => {
+  if (typeof item === 'number') return false;
+
+  const typeValue = String(item.type ?? item.kind ?? item.itemType ?? item.entityType ?? '').toLowerCase();
+  const idValue = String(item.id ?? item.id_board ?? item.boardId ?? '').toLowerCase();
+  const imageUrl = String(getPrivateHandItemImageUrl(item) ?? '').toLowerCase();
+
+  return Boolean(
+    item.board ||
+      item.id_board != null ||
+      item.boardId != null ||
+      typeValue.includes('board') ||
+      typeValue.includes('tablero') ||
+      idValue.startsWith('b_') ||
+      idValue.includes('board') ||
+      idValue.includes('tablero') ||
+      imageUrl.includes('/boards/') ||
+      imageUrl.includes('/tableros/') ||
+      imageUrl.includes('board') ||
+      imageUrl.includes('tablero')
+  );
+};
+
+const extractPrivateHandBoardImageUrl = (items: PrivateHandItem[]) => {
+  const boardItem = items.find(isPrivateHandBoardItem);
+  return boardItem ? getPrivateHandItemImageUrl(boardItem) : null;
+};
+
+const getBoardStateImageUrl = (board: unknown) => {
+  if (!board || typeof board !== 'object') return null;
+
+  const boardValue = board as Record<string, any>;
+  return (
+    getImageUrl(boardValue.url_image) ??
+    getImageUrl(boardValue.imageUrl) ??
+    getImageUrl(boardValue.image_url) ??
+    getImageUrl(boardValue.url) ??
+    getImageUrl(boardValue.board?.url_image) ??
+    getImageUrl(boardValue.board?.imageUrl) ??
+    null
+  );
+};
 
 const normalizeNumberList = (value: unknown): number[] =>
   Array.isArray(value)
@@ -121,6 +184,7 @@ export default function GameScreen() {
   const [catalogCardUrls, setCatalogCardUrls] = useState<Record<string, string>>({});
   const [knownCardUrls, setKnownCardUrls] = useState<Record<string, string>>({});
   const [boardImageFailed, setBoardImageFailed] = useState(false);
+  const [lastKnownBoardImageUrl, setLastKnownBoardImageUrl] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatText, setChatText] = useState('');
   const emitGameActionRef = useRef(emitGameAction);
@@ -301,11 +365,18 @@ export default function GameScreen() {
     setSelectedVoteCardId(recoveredSelectedVoteCardId);
   }, [currentPhase, hasRecoveredSelectedVote, recoveredSelectedVoteCardId]);
 
+  const privateHandItems = useMemo(() => privateHand as PrivateHandItem[], [privateHand]);
+  const privateHandBoardImageUrl = useMemo(
+    () => extractPrivateHandBoardImageUrl(privateHandItems),
+    [privateHandItems]
+  );
+
   const handCards = useMemo<HandCard[]>(
     () => {
       const uniqueCards = new Map<number, HandCard>();
 
-      privateHand
+      privateHandItems
+        .filter((card) => !isPrivateHandBoardItem(card))
         .map((card, index) => {
           if (typeof card === 'number') {
             return {
@@ -315,11 +386,12 @@ export default function GameScreen() {
             };
           }
 
-          const numericId = normalizeCardId(card.id);
+          const numericId = normalizeCardId(card.id ?? card.cardId ?? card.id_card ?? '');
+          const imageUrl = getPrivateHandItemImageUrl(card);
           return {
             id: numericId || index + 1,
-            rawId: String(card.id),
-            url_image: typeof card.url_image === 'string' && card.url_image.trim().length > 0 ? card.url_image : null,
+            rawId: String(card.id ?? card.cardId ?? card.id_card ?? numericId),
+            url_image: imageUrl,
           };
         })
         .filter((card) => Number.isFinite(card.id))
@@ -332,7 +404,7 @@ export default function GameScreen() {
 
       return Array.from(uniqueCards.values());
     },
-    [privateHand]
+    [privateHandItems]
   );
 
   const boardCardsDetailed = currentRound?.boardCardsDetailed;
@@ -345,8 +417,9 @@ export default function GameScreen() {
             const url = typeof card.url_image === 'string' && card.url_image.trim().length > 0
               ? card.url_image
               : null;
+            const playerId = String(card.playerId ?? card.player_id ?? card.ownerId ?? card.owner_id ?? card.playedBy ?? '').trim();
 
-            return Number.isFinite(id) && id > 0 ? { id, url_image: url } : null;
+            return Number.isFinite(id) && id > 0 ? { id, url_image: url, playerId: playerId || undefined } : null;
           })
           .filter((card): card is BoardCard => Boolean(card));
       }
@@ -444,22 +517,30 @@ export default function GameScreen() {
     [playedCards]
   );
   const playedBoardCards = useMemo<BoardCard[]>(() => {
-    if (boardCards.length > 0) return boardCards;
+    const boardCardUrlsById = boardCards.reduce<Record<string, string>>((acc, card) => {
+      if (typeof card.url_image === 'string' && card.url_image.trim().length > 0) {
+        acc[String(card.id)] = card.url_image;
+      }
+      return acc;
+    }, {});
 
-    return Object.values(normalizedPlayedCards).map((cardId) => ({
-      id: cardId,
-      url_image: null,
-    }));
-  }, [boardCards, normalizedPlayedCards]);
-  const ownPlayedCardId = normalizedPlayedCards[currentUserId];
-  const voteableBoardCards = playedBoardCards.filter((card) => card.id !== ownPlayedCardId);
-  const storytellerBoardCards = playedBoardCards.filter((card) => card.id !== ownPlayedCardId);
+    if (Object.keys(normalizedPlayedCards).length > 0) {
+      return Object.entries(normalizedPlayedCards).map(([playerId, cardId]) => ({
+        id: cardId,
+        playerId,
+        url_image: boardCardUrlsById[String(cardId)] ?? knownCardUrls[String(cardId)] ?? null,
+      }));
+    }
+
+    return boardCards;
+  }, [boardCards, knownCardUrls, normalizedPlayedCards]);
+  const voteableBoardCards = playedBoardCards.filter((card) => card.playerId !== currentUserId);
+  const storytellerBoardCards = playedBoardCards.filter((card) => card.playerId !== currentUserId);
   const boardTiles = Array.isArray(gameState?.board?.tiles) && gameState.board.tiles.length > 0 ? gameState.board.tiles : FALLBACK_BOARD;
-  const boardImageUrl =
-    typeof gameState?.board?.url_image === 'string' && gameState.board.url_image.trim().length > 0
-      ? gameState.board.url_image
-      : null;
+  const currentBoardImageUrl = getBoardStateImageUrl(gameState?.board) ?? privateHandBoardImageUrl;
+  const boardImageUrl = currentBoardImageUrl ?? lastKnownBoardImageUrl;
   const boardHasOverlay = Boolean(boardImageUrl && !boardImageFailed);
+
   const activeConflictData = gameState?.activeConflict ?? activeConflict ?? null;
   const activeConflictKey = activeConflictData
     ? `${activeConflictData.player1}:${activeConflictData.player2}:${activeConflictData.isDuel ? 'duel' : 'tie'}`
@@ -515,6 +596,12 @@ export default function GameScreen() {
   useEffect(() => {
     setBoardImageFailed(false);
   }, [boardImageUrl]);
+
+  useEffect(() => {
+    if (currentBoardImageUrl) {
+      setLastKnownBoardImageUrl(currentBoardImageUrl);
+    }
+  }, [currentBoardImageUrl]);
 
   useEffect(() => {
     if (!activeStar) {
@@ -1511,6 +1598,15 @@ export default function GameScreen() {
           <View style={styles.panel}>
             <Text style={styles.sectionLabel}>Tablero</Text>
             <View style={styles.boardCanvas}>
+              {boardImageUrl ? (
+                <Image
+                  source={{ uri: boardImageUrl }}
+                  style={styles.boardPreviewOverlay}
+                  resizeMode="cover"
+                  onError={() => setBoardImageFailed(true)}
+                  onLoad={() => setBoardImageFailed(false)}
+                />
+              ) : null}
               <View style={styles.boardGrid}>
               {boardTiles.map((tile: any, index) => {
                 const tileIndex = tile.index ?? tile.numero ?? index + 1;
@@ -1527,12 +1623,8 @@ export default function GameScreen() {
                       boardHasOverlay && styles.boardTileOverlay,
                     ]}
                   >
-                    {!boardHasOverlay ? (
-                      <>
-                        <Text style={styles.boardTileGlyph}>{glyph}</Text>
-                        <Text style={styles.boardTileText}>{tileIndex}</Text>
-                      </>
-                    ) : null}
+                    <Text style={styles.boardTileGlyph}>{glyph}</Text>
+                    <Text style={styles.boardTileText}>{tileIndex}</Text>
                     {occupants.length > 0 ? (
                       <View style={styles.tileOccupants}>
                         {occupants.map((player) => (
@@ -1546,15 +1638,6 @@ export default function GameScreen() {
                 );
               })}
               </View>
-              {boardImageUrl ? (
-                <Image
-                  source={{ uri: boardImageUrl }}
-                  style={styles.boardPreviewOverlay}
-                  resizeMode="stretch"
-                  onError={() => setBoardImageFailed(true)}
-                  onLoad={() => setBoardImageFailed(false)}
-                />
-              ) : null}
             </View>
           </View>
 
@@ -1947,11 +2030,13 @@ const styles = StyleSheet.create({
     position: 'relative',
     borderRadius: 16,
     overflow: 'hidden',
+    padding: 14,
+    backgroundColor: 'rgba(18, 30, 48, 0.92)',
   },
   boardPreviewOverlay: {
     ...StyleSheet.absoluteFillObject,
     borderRadius: 16,
-    zIndex: 1,
+    zIndex: 0,
   },
   boardGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'center', position: 'relative', zIndex: 2 },
   boardTile: {
@@ -1970,8 +2055,8 @@ const styles = StyleSheet.create({
     borderColor: '#FCEEB5',
   },
   boardTileOverlay: {
-    backgroundColor: 'transparent',
-    borderColor: 'transparent',
+    backgroundColor: 'rgba(18, 30, 48, 0.58)',
+    borderColor: 'rgba(252,238,181,0.42)',
   },
   boardTileGlyph: {
     color: '#FCEEB5',

@@ -114,7 +114,7 @@ type GameSessionContextValue = {
   currentLobbyCode: string | null;
   lobbyState: LobbyState | null;
   gameState: GenericGameState | null;
-  privateHand: Array<number | { id: string; url_image: string }>;
+  privateHand: (number | Record<string, any>)[];
   duelAvailableFor: string | null;
   activeConflict: GameConflictPayload | null;
   latestSpecialEvent: GameSpecialEventPayload | null;
@@ -144,7 +144,7 @@ type GameSessionContextValue = {
   sendLobbyChatMessage: (text: string, lobbyCode?: string | null) => boolean;
   dismissActiveGame: (lobbyCode?: string | null) => Promise<void>;
   closeActiveGame: (lobbyCode?: string | null) => Promise<void>;
-  startLobbyGame: () => void;
+  startLobbyGame: (useDynamicPool?: boolean) => void;
   setActiveGameId: (value: string | null) => void;
 };
 
@@ -161,7 +161,7 @@ export function GameSessionProvider({ children }: PropsWithChildren) {
   const [currentLobbyCode, setCurrentLobbyCode] = useState<string | null>(null);
   const [lobbyState, setLobbyState] = useState<LobbyState | null>(null);
   const [gameState, setGameState] = useState<GenericGameState | null>(null);
-  const [privateHand, setPrivateHand] = useState<Array<number | { id: string; url_image: string }>>([]);
+  const [privateHand, setPrivateHand] = useState<(number | Record<string, any>)[]>([]);
   const [duelAvailableFor, setDuelAvailableFor] = useState<string | null>(null);
   const [activeConflict, setActiveConflict] = useState<GameConflictPayload | null>(null);
   const [latestSpecialEvent, setLatestSpecialEvent] = useState<GameSpecialEventPayload | null>(null);
@@ -296,9 +296,9 @@ export function GameSessionProvider({ children }: PropsWithChildren) {
     });
   };
 
-  const startLobbyGame = () => {
+  const startLobbyGame = (useDynamicPool = true) => {
     if (!socketRef.current || !socketRef.current.connected) return;
-    socketRef.current.emit('client:lobby:start');
+    socketRef.current.emit('client:lobby:start', { useDynamicPool });
   };
 
   const pushLobbyNotice = (kind: LobbyNotice['kind'], message: string) => {
@@ -634,8 +634,46 @@ export function GameSessionProvider({ children }: PropsWithChildren) {
       });
     });
 
-    socket.on('server:game:private_hand', (payload: { hand: Array<number | { id: string; url_image: string }> }) => {
-      setPrivateHand(payload.hand ?? []);
+    socket.on('server:game:private_hand', (payload: {
+      hand?: (number | Record<string, any>)[];
+      board?: Record<string, any>;
+      boardImageUrl?: string;
+      board_url_image?: string;
+    }) => {
+      const boardImageUrl = payload.boardImageUrl ?? payload.board_url_image;
+      const boardItems = [
+        ...(payload.board ? [payload.board] : []),
+        ...(boardImageUrl ? [{ type: 'board', url_image: boardImageUrl }] : []),
+      ];
+
+      setPrivateHand((previous) => {
+        const previousBoardItems = previous.filter((item) => {
+          if (typeof item === 'number') return false;
+
+          const typeValue = String(item.type ?? item.kind ?? item.itemType ?? item.entityType ?? '').toLowerCase();
+          const idValue = String(item.id ?? item.id_board ?? item.boardId ?? '').toLowerCase();
+          const imageValue = String(
+            item.url_image ?? item.imageUrl ?? item.image_url ?? item.url ?? item.board?.url_image ?? item.board?.imageUrl ?? ''
+          ).toLowerCase();
+
+          return Boolean(
+            item.board ||
+              item.id_board != null ||
+              item.boardId != null ||
+              typeValue.includes('board') ||
+              typeValue.includes('tablero') ||
+              idValue.startsWith('b_') ||
+              idValue.includes('board') ||
+              idValue.includes('tablero') ||
+              imageValue.includes('/boards/') ||
+              imageValue.includes('/tableros/') ||
+              imageValue.includes('board') ||
+              imageValue.includes('tablero')
+          );
+        });
+
+        return [...(payload.hand ?? []), ...(boardItems.length > 0 ? boardItems : previousBoardItems)];
+      });
     });
 
     socket.on('server:game:deck_reshuffled', () => {
@@ -650,6 +688,7 @@ export function GameSessionProvider({ children }: PropsWithChildren) {
       setLatestSpecialEvent(payload);
       if (payload.effect === 'CONFLICT_RESOLVED' || payload.effect === 'CONFLICT_CANCELLED') {
         setActiveConflict(null);
+        setDuelAvailableFor(null);
       }
       if (String(payload.effect ?? '').startsWith('MODE_CHANGED')) {
         setModeChangeOffer(null);
@@ -683,6 +722,9 @@ export function GameSessionProvider({ children }: PropsWithChildren) {
     });
 
     socket.on('server:game:minigame_start', (payload: GameConflictPayload) => {
+      if (payload.isDuel) {
+        setDuelAvailableFor(null);
+      }
       setActiveConflict(payload);
     });
 
