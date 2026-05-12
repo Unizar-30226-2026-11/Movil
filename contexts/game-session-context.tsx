@@ -1,5 +1,10 @@
 import { API_URL, SOCKET_URL } from '@/constants/api';
 import {
+  addDismissedActiveLobbyCode,
+  removeDismissedActiveLobbyCode,
+  readDismissedActiveLobbyCodes,
+} from '@/constants/dismissed-active-lobbies';
+import {
   GameConflictPayload,
   GameEndedPayload,
   GameModeChangeOfferPayload,
@@ -67,8 +72,6 @@ export type LobbyChatMessage = {
 type ConnectLobbyOptions = {
   emitJoin?: boolean;
 };
-
-const DISMISSED_ACTIVE_LOBBY_STORAGE_KEY = 'dismissedActiveLobbyCode';
 
 const mergeBoardPayload = (
   previousBoard: GenericGameState['board'] | null | undefined,
@@ -143,7 +146,7 @@ type GameSessionContextValue = {
   leaveLobbySession: () => void;
   sendLobbyChatMessage: (text: string, lobbyCode?: string | null) => boolean;
   dismissActiveGame: (lobbyCode?: string | null) => Promise<void>;
-  closeActiveGame: (lobbyCode?: string | null) => Promise<void>;
+  closeActiveGame: (lobbyCode?: string | null, mode?: 'lobby' | 'game') => Promise<void>;
   startLobbyGame: (useDynamicPool?: boolean) => void;
   setActiveGameId: (value: string | null) => void;
 };
@@ -190,29 +193,47 @@ export function GameSessionProvider({ children }: PropsWithChildren) {
   const syncConflictFromState = (state: GenericGameState | null | undefined) => {
     if (state?.isMinigameActive && state.activeConflict) {
       setActiveConflict((previous) => {
-        if (
-          typeof state.activeConflict?.type === 'number' &&
-          typeof state.activeConflict?.duration === 'number'
-        ) {
-          return {
-            player1: state.activeConflict.player1,
-            player2: state.activeConflict.player2,
-            type: state.activeConflict.type,
-            duration: state.activeConflict.duration,
-            isDuel: state.activeConflict.isDuel,
-          };
+        const stateConflict = state.activeConflict!;
+        const stateParticipants = [stateConflict.player1, stateConflict.player2].filter(Boolean).sort().join(':');
+        const previousParticipants = previous
+          ? [previous.player1, previous.player2].filter(Boolean).sort().join(':')
+          : '';
+        const parsedType = Number(stateConflict.type);
+        const parsedDuration = Number(stateConflict.duration);
+        const hasPlayableConflict =
+          (parsedType === 0 || parsedType === 1 || parsedType === 2) &&
+          Number.isFinite(parsedDuration) &&
+          parsedDuration > 0;
+
+        if (!hasPlayableConflict) {
+          if (
+            previous &&
+            previousParticipants === stateParticipants &&
+            previous.isDuel === stateConflict.isDuel
+          ) {
+            return previous;
+          }
+
+          return null;
         }
 
         if (
           previous &&
-          previous.player1 === state.activeConflict?.player1 &&
-          previous.player2 === state.activeConflict?.player2 &&
-          previous.isDuel === state.activeConflict?.isDuel
+          previousParticipants === stateParticipants &&
+          previous.type === parsedType &&
+          previous.duration === parsedDuration &&
+          previous.isDuel === stateConflict.isDuel
         ) {
           return previous;
         }
 
-        return null;
+        return {
+          player1: stateConflict.player1,
+          player2: stateConflict.player2,
+          type: parsedType as 0 | 1 | 2,
+          duration: parsedDuration,
+          isDuel: stateConflict.isDuel,
+        };
       });
       return;
     }
@@ -338,11 +359,9 @@ export function GameSessionProvider({ children }: PropsWithChildren) {
       if (!response.ok) return;
 
       const data = (await response.json()) as RefreshResponse;
-      const dismissedLobbyCode = await AsyncStorage.getItem(
-        DISMISSED_ACTIVE_LOBBY_STORAGE_KEY,
-      );
+      const dismissedLobbyCodes = await readDismissedActiveLobbyCodes();
       if (!data.activeSession || !data.wsToken || !data.lobbyCode) return;
-      if (dismissedLobbyCode === data.lobbyCode) return;
+      if (dismissedLobbyCodes.includes(String(data.lobbyCode).toUpperCase())) return;
 
       socketDisabledRef.current = false;
       missingLobbyCleanupRef.current = null;
@@ -387,10 +406,7 @@ export function GameSessionProvider({ children }: PropsWithChildren) {
       const missingLobbyCode = currentLobbyCodeRef.current ?? activeGameId;
       if (missingLobbyCode && missingLobbyCleanupRef.current !== missingLobbyCode) {
         missingLobbyCleanupRef.current = missingLobbyCode;
-        void AsyncStorage.setItem(
-          DISMISSED_ACTIVE_LOBBY_STORAGE_KEY,
-          missingLobbyCode,
-        );
+        void addDismissedActiveLobbyCode(missingLobbyCode);
       }
 
       socketDisabledRef.current = true;
@@ -421,16 +437,16 @@ export function GameSessionProvider({ children }: PropsWithChildren) {
   const dismissActiveGame = async (lobbyCode?: string | null) => {
     const resolvedLobbyCode = lobbyCode ?? currentLobbyCodeRef.current ?? activeGameId;
     if (resolvedLobbyCode) {
-      await AsyncStorage.setItem(
-        DISMISSED_ACTIVE_LOBBY_STORAGE_KEY,
-        String(resolvedLobbyCode),
-      );
+      await addDismissedActiveLobbyCode(String(resolvedLobbyCode));
     }
 
     leaveLobbySession();
   };
 
-  const closeActiveGame = async (lobbyCode?: string | null) => {
+  const closeActiveGame = async (
+    lobbyCode?: string | null,
+    mode: 'lobby' | 'game' = 'game'
+  ) => {
     const resolvedLobbyCode = lobbyCode ?? currentLobbyCodeRef.current ?? activeGameId;
     const storedToken = await AsyncStorage.getItem('userToken');
 
@@ -441,8 +457,11 @@ export function GameSessionProvider({ children }: PropsWithChildren) {
 
     const activeSocket = socketRef.current;
     if (activeSocket?.connected && currentLobbyCodeRef.current === resolvedLobbyCode) {
-      activeSocket.emit('client:game:end', { lobbyCode: resolvedLobbyCode });
-      await new Promise((resolve) => setTimeout(resolve, 350));
+      if (mode === 'game') {
+        activeSocket.emit('client:game:end', { lobbyCode: resolvedLobbyCode });
+        await new Promise((resolve) => setTimeout(resolve, 350));
+      }
+
       if (activeSocket.connected) {
         activeSocket.emit('client:lobby:leave');
       }
@@ -496,12 +515,14 @@ export function GameSessionProvider({ children }: PropsWithChildren) {
         const timeout = setTimeout(finish, 1200);
 
         closeSocket.on('connect', () => {
-          closeSocket.emit('client:game:end', { lobbyCode: resolvedLobbyCode });
+          if (mode === 'game') {
+            closeSocket.emit('client:game:end', { lobbyCode: resolvedLobbyCode });
+          }
           clearTimeout(timeout);
           setTimeout(() => {
             closeSocket.emit('client:lobby:leave');
             setTimeout(finish, 250);
-          }, 350);
+          }, mode === 'game' ? 350 : 150);
         });
 
         closeSocket.on('connect_error', () => {
@@ -750,15 +771,22 @@ export function GameSessionProvider({ children }: PropsWithChildren) {
     socket.on('server:game:ended', (payload: GameEndedPayload) => {
       const finishedLobbyCode = currentLobbyCodeRef.current;
       if (finishedLobbyCode) {
-        void AsyncStorage.setItem(
-          DISMISSED_ACTIVE_LOBBY_STORAGE_KEY,
-          finishedLobbyCode,
-        );
+        void addDismissedActiveLobbyCode(finishedLobbyCode);
       }
       setFinalRanking(Array.isArray(payload?.ranking) ? payload.ranking : []);
+      setToken(null);
+      pendingLobbyJoinRef.current = false;
+      missingLobbyCleanupRef.current = finishedLobbyCode ?? null;
+      updateCurrentLobbyCode(null);
+      setLobbyState(null);
+      setPrivateHand([]);
+      setLatestSpecialEvent(null);
+      setModeChangeOffer(null);
+      setDuelAvailableFor(null);
       setActiveConflict(null);
       setActiveStar(null);
       setActiveGameId(null);
+      disconnectSocket();
     });
 
     socket.on('server:game:error', (payload: { message: string }) => {
@@ -783,7 +811,7 @@ export function GameSessionProvider({ children }: PropsWithChildren) {
     lobbyCode: string,
     options?: ConnectLobbyOptions
   ) => {
-    void AsyncStorage.removeItem(DISMISSED_ACTIVE_LOBBY_STORAGE_KEY);
+    void removeDismissedActiveLobbyCode(lobbyCode);
     socketDisabledRef.current = false;
     missingLobbyCleanupRef.current = null;
     updateCurrentLobbyCode(lobbyCode);
@@ -811,12 +839,10 @@ export function GameSessionProvider({ children }: PropsWithChildren) {
       }
 
       const data = (await response.json()) as RefreshResponse;
-      const dismissedLobbyCode = await AsyncStorage.getItem(
-        DISMISSED_ACTIVE_LOBBY_STORAGE_KEY,
-      );
+      const dismissedLobbyCodes = await readDismissedActiveLobbyCodes();
 
       if (data.activeSession && data.wsToken && data.lobbyCode) {
-        if (dismissedLobbyCode === data.lobbyCode) {
+        if (dismissedLobbyCodes.includes(String(data.lobbyCode).toUpperCase())) {
           setActiveGameId(null);
           setToken(null);
           clearRealtimeState();
@@ -868,12 +894,10 @@ export function GameSessionProvider({ children }: PropsWithChildren) {
       }
 
       const data = (await response.json()) as RefreshResponse;
-      const dismissedLobbyCode = await AsyncStorage.getItem(
-        DISMISSED_ACTIVE_LOBBY_STORAGE_KEY,
-      );
+      const dismissedLobbyCodes = await readDismissedActiveLobbyCodes();
 
       if (data.activeSession && data.lobbyCode) {
-        if (dismissedLobbyCode === data.lobbyCode) {
+        if (dismissedLobbyCodes.includes(String(data.lobbyCode).toUpperCase())) {
           setActiveGameId(null);
           setToken(null);
           clearRealtimeState();

@@ -37,11 +37,13 @@ export function MemoryPairsDuel({ duration, onComplete }: MemoryPairsDuelProps) 
   const finishedRef = useRef(false);
 
   useEffect(() => {
-    scoreRef.current = score;
-  }, [score]);
-
-  useEffect(() => {
     finishedRef.current = false;
+    scoreRef.current = 0;
+    setRemaining(duration);
+    setMatchedIds([]);
+    setOpenedIds([]);
+    setScore(0);
+
     const timerInterval = setInterval(() => {
       setRemaining((prev) => {
         if (prev <= 1) {
@@ -54,7 +56,7 @@ export function MemoryPairsDuel({ duration, onComplete }: MemoryPairsDuelProps) 
     }, 1000);
 
     return () => clearInterval(timerInterval);
-  }, [onComplete]);
+  }, [duration]);
 
   useEffect(() => {
     if (remaining !== 0 || finishedRef.current) return;
@@ -63,7 +65,7 @@ export function MemoryPairsDuel({ duration, onComplete }: MemoryPairsDuelProps) 
   }, [onComplete, remaining]);
 
   useEffect(() => {
-    if (openedIds.length !== 2) return;
+    if (finishedRef.current || openedIds.length !== 2) return;
 
     const [first, second] = openedIds;
     const firstCard = deck.find((card) => card.id === first);
@@ -71,7 +73,11 @@ export function MemoryPairsDuel({ duration, onComplete }: MemoryPairsDuelProps) 
 
     if (firstCard?.value === secondCard?.value) {
       setMatchedIds((prev) => [...prev, first, second]);
-      setScore((prev) => prev + 2);
+      setScore((prev) => {
+        const nextScore = prev + 2;
+        scoreRef.current = nextScore;
+        return nextScore;
+      });
       setOpenedIds([]);
       return;
     }
@@ -86,7 +92,7 @@ export function MemoryPairsDuel({ duration, onComplete }: MemoryPairsDuelProps) 
   return (
     <View style={styles.wrapper}>
       <Text style={styles.title}>Memoria frutal</Text>
-      <Text style={styles.caption}>Tiempo: {remaining}s · Parejas: {matchedIds.length / 2}</Text>
+      <Text style={styles.caption}>Tiempo: {remaining}s · Parejas: {matchedIds.length / 2} · Puntos: {score}</Text>
       <ImageBackground source={require('../../assets/images/minigames/memory-night-sky.jpg')} style={styles.skyPanel} imageStyle={styles.skyPanelImage}>
         <View style={styles.skyOverlay} />
         <View style={styles.grid}>
@@ -97,7 +103,7 @@ export function MemoryPairsDuel({ duration, onComplete }: MemoryPairsDuelProps) 
               <TouchableOpacity
                 key={card.id}
                 style={[styles.card, isOpen && styles.cardOpen, matchedIds.includes(card.id) && styles.cardMatched]}
-                disabled={isOpen || openedIds.length === 2}
+                disabled={finishedRef.current || remaining === 0 || isOpen || openedIds.length === 2}
                 onPress={() => setOpenedIds((prev) => [...prev, card.id])}
               >
                 <View style={styles.cardFace}>
@@ -142,7 +148,6 @@ const styles = StyleSheet.create({
     borderRadius: 24,
   },
   skyOverlay: {
-    position: 'absolute',
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(7, 20, 35, 0.42)',
   },

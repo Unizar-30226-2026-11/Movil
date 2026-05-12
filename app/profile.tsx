@@ -1,15 +1,17 @@
 import {
-  StyleSheet, Text, View, ImageBackground, Image,
-  TouchableOpacity, ScrollView, SafeAreaView, Alert, Modal, TextInput
+  StyleSheet, Text, View, ImageBackground,
+  TouchableOpacity, ScrollView, SafeAreaView, Alert, Modal, TextInput, FlatList
 } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import { useFonts } from 'expo-font';
-import { useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import * as SplashScreen from 'expo-splash-screen';
 import Svg, { Text as SvgText } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URL } from '@/constants/api';
+import { normalizeRemoteAssetUrl } from '@/constants/asset-url';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -30,6 +32,31 @@ type OwnedBoard = {
   description: string;
   url_image: string | null;
 };
+
+type ProfileCardTileProps = {
+  card: OwnedCard;
+};
+
+const ProfileCardTile = memo(function ProfileCardTile({ card }: ProfileCardTileProps) {
+  return (
+    <View style={styles.cardItem}>
+      <View style={styles.cardImageBox}>
+        {card.url_image ? (
+          <ExpoImage
+            source={{ uri: card.url_image }}
+            style={styles.cardImage}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+          />
+        ) : (
+          <View style={styles.cardImagePlaceholder}>
+            <Ionicons name="image-outline" size={32} color="#FCEEB5" />
+          </View>
+        )}
+      </View>
+    </View>
+  );
+});
 
 const PRESENCE_OPTIONS: { value: PresenceStatus; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
   { value: 'CONNECTED', label: 'Conectado', icon: 'radio-button-on-outline' },
@@ -172,7 +199,7 @@ export default function ProfileScreen() {
           id: String(board.id ?? board.boardId ?? board.id_board),
           name: String(board.name ?? 'Tablero sin nombre'),
           description: String(board.description ?? ''),
-          url_image: typeof board.url_image === 'string' && board.url_image.trim().length > 0 ? board.url_image : null,
+          url_image: normalizeRemoteAssetUrl(board.url_image),
         })).filter((board: OwnedBoard) => board.id);
 
         setOwnedBoards(boards);
@@ -259,7 +286,7 @@ export default function ProfileScreen() {
           name: String(carta.name ?? carta.title ?? 'Carta sin nombre'),
           quantity: 1,
           rarity: String(carta.rarity ?? 'COMMON'),
-          url_image: typeof carta.url_image === 'string' && carta.url_image.trim().length > 0 ? carta.url_image : null,
+          url_image: normalizeRemoteAssetUrl(carta.url_image),
           collectionName: resolveCardCollectionName(
             carta,
             collectionMap.get(String(carta.cardId ?? carta.id ?? carta.id_card)),
@@ -408,12 +435,23 @@ export default function ProfileScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded, error]);
 
-  if (!loaded && !error) return null;
+  const collectionNames = useMemo(
+    () => ['Todas', ...Array.from(new Set(ownedCards.map(card => card.collectionName)))],
+    [ownedCards]
+  );
+  const visibleCards = useMemo(
+    () =>
+      selectedCollectionName === 'Todas'
+        ? ownedCards
+        : ownedCards.filter(card => card.collectionName === selectedCollectionName),
+    [ownedCards, selectedCollectionName]
+  );
+  const renderOwnedCard = useCallback(
+    ({ item: card }: { item: OwnedCard }) => <ProfileCardTile card={card} />,
+    []
+  );
 
-  const collectionNames = ['Todas', ...Array.from(new Set(ownedCards.map(card => card.collectionName)))];
-  const visibleCards = selectedCollectionName === 'Todas'
-    ? ownedCards
-    : ownedCards.filter(card => card.collectionName === selectedCollectionName);
+  if (!loaded && !error) return null;
 
   return (
     <ImageBackground
@@ -598,21 +636,18 @@ export default function ProfileScreen() {
               ) : visibleCards.length === 0 ? (
                 <Text style={styles.emptyCardsText}>No hay cartas en esta coleccion.</Text>
               ) : (
-                <ScrollView contentContainerStyle={styles.cardsGrid} showsVerticalScrollIndicator={false}>
-                  {visibleCards.map((card, index) => (
-                    <View key={`${card.cardId}-${index}`} style={styles.cardItem}>
-                      <View style={styles.cardImageBox}>
-                        {card.url_image ? (
-                          <Image source={{ uri: card.url_image }} style={styles.cardImage} resizeMode="cover" />
-                        ) : (
-                          <View style={styles.cardImagePlaceholder}>
-                            <Ionicons name="image-outline" size={32} color="#FCEEB5" />
-                          </View>
-                        )}
-                      </View>
-                    </View>
-                  ))}
-                </ScrollView>
+                <FlatList
+                  data={visibleCards}
+                  keyExtractor={(item) => item.cardId}
+                  numColumns={3}
+                  initialNumToRender={18}
+                  windowSize={7}
+                  removeClippedSubviews
+                  contentContainerStyle={styles.cardsGrid}
+                  showsVerticalScrollIndicator={false}
+                  columnWrapperStyle={styles.cardsGridRow}
+                  renderItem={renderOwnedCard}
+                />
               )}
             </View>
           </View>
@@ -649,7 +684,12 @@ export default function ProfileScreen() {
                     <View key={`${board.id}-${index}`} style={styles.boardItem}>
                       <View style={styles.boardImageBox}>
                         {board.url_image ? (
-                          <Image source={{ uri: board.url_image }} style={styles.cardImage} resizeMode="cover" />
+                          <ExpoImage
+                            source={{ uri: board.url_image }}
+                            style={styles.cardImage}
+                            contentFit="cover"
+                            cachePolicy="memory-disk"
+                          />
                         ) : (
                           <View style={styles.cardImagePlaceholder}>
                             <Ionicons name="map-outline" size={34} color="#FCEEB5" />
@@ -885,7 +925,8 @@ const styles = StyleSheet.create({
     color: '#10212e',
   },
   emptyCardsText: { color: '#d7dce2', textAlign: 'center', paddingVertical: 30 },
-  cardsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingBottom: 8 },
+  cardsGrid: { paddingBottom: 8 },
+  cardsGridRow: { justifyContent: 'space-between', marginBottom: 10 },
   boardsGrid: { gap: 12, paddingBottom: 8 },
   cardItem: {
     width: '31%',

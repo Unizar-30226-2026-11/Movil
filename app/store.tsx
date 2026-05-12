@@ -1,17 +1,17 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useFonts } from 'expo-font';
+import { Image as ExpoImage } from 'expo-image';
 import { router, useFocusEffect } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Image,
   ImageBackground,
+  FlatList,
   Modal,
   SafeAreaView,
-  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -20,6 +20,7 @@ import {
 import Svg, { Text as SvgText } from 'react-native-svg';
 
 import { API_URL } from '@/constants/api';
+import { normalizeRemoteAssetUrl } from '@/constants/asset-url';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -44,6 +45,12 @@ type OwnershipSnapshot = {
   cardIds: Set<string>;
   boardIds: Set<string>;
   collectionIds: Set<string>;
+};
+
+type StoreProductCardProps = {
+  producto: NormalizedShopItem;
+  isPurchasing: boolean;
+  onOpen: (producto: NormalizedShopItem) => void;
 };
 
 const ITEM_TYPE_LABELS: Record<StoreItemType, string> = {
@@ -266,13 +273,9 @@ function normalizeShopItem(item: RawShopItem, index: number, ownership: Ownershi
           ? 'Coleccion completa con precio reducido.'
           : 'Articulo disponible en tu tienda diaria.');
   const imageUrl =
-    typeof item.url_image === 'string' && item.url_image.trim().length > 0
-      ? item.url_image
-      : typeof item.card?.url_image === 'string' && item.card.url_image.trim().length > 0
-        ? item.card.url_image
-        : typeof item.board?.url_image === 'string' && item.board.url_image.trim().length > 0
-          ? item.board.url_image
-          : null;
+    normalizeRemoteAssetUrl(item.url_image) ??
+    normalizeRemoteAssetUrl(item.card?.url_image) ??
+    normalizeRemoteAssetUrl(item.board?.url_image);
 
   return {
     key: purchaseItemId ?? `${type}-${item.id ?? index}`,
@@ -320,6 +323,68 @@ function flattenShopPayload(payload: unknown): RawShopItem[] {
   return items;
 }
 
+const StoreProductCard = memo(function StoreProductCard({
+  producto,
+  isPurchasing,
+  onOpen,
+}: StoreProductCardProps) {
+  return (
+    <View style={styles.cardContainer}>
+      <View style={[styles.cardMedia, { borderColor: producto.accent }]}>
+        {producto.imageUrl ? (
+          <ExpoImage
+            source={{ uri: producto.imageUrl }}
+            style={styles.cardImage}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+          />
+        ) : (
+          <>
+            <Ionicons name={producto.icon} size={42} color={producto.accent} />
+            <Text style={[styles.cardType, { color: producto.accent }]}>
+              {ITEM_TYPE_LABELS[producto.type]}
+            </Text>
+          </>
+        )}
+        {producto.imageUrl ? (
+          <View style={styles.imageTypeBadge}>
+            <Text style={[styles.imageTypeBadgeText, { color: producto.accent }]}>
+              {ITEM_TYPE_LABELS[producto.type]}
+            </Text>
+          </View>
+        ) : null}
+      </View>
+
+      <Text style={styles.deckName}>{producto.name}</Text>
+      <Text style={styles.deckDescription}>{producto.description}</Text>
+
+      <View style={styles.cardFooter}>
+        <View style={styles.priceContainer}>
+          <Ionicons name="cash" size={16} color="#FFD700" />
+          <Text style={styles.priceText}>{producto.price}</Text>
+        </View>
+
+        <TouchableOpacity
+          style={[
+            styles.buyButton,
+            (!producto.purchaseItemId || producto.isPurchased || isPurchasing) && styles.buyButtonDisabled,
+          ]}
+          disabled={!producto.purchaseItemId || producto.isPurchased || isPurchasing}
+          onPress={() => onOpen(producto)}
+        >
+          <Text style={styles.buyText}>
+            {producto.isPurchased
+              ? 'Comprado'
+              : producto.purchaseItemId
+                ? 'Comprar'
+                : 'No disponible'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+});
+
 export default function StoreScreen() {
   const [loaded, error] = useFonts({
     FuenteTitulo: require('../assets/fonts/fuente-dilana.ttf'),
@@ -330,6 +395,7 @@ export default function StoreScreen() {
   const [coins, setCoins] = useState(0);
   const [isLoadingShop, setIsLoadingShop] = useState(true);
   const [isPurchasing, setIsPurchasing] = useState(false);
+  const [isRefreshingBalance, setIsRefreshingBalance] = useState(false);
   const [ownership, setOwnership] = useState<OwnershipSnapshot>({
     cardIds: new Set(),
     boardIds: new Set(),
@@ -367,6 +433,7 @@ export default function StoreScreen() {
     useCallback(() => {
       easterEggTapCountRef.current = 0;
       setEasterEggVisible(false);
+      void fetchBalance();
     }, [])
   );
 
@@ -503,7 +570,16 @@ export default function StoreScreen() {
     }
   };
 
-  const abrirCompra = (producto: NormalizedShopItem) => {
+  const refreshBalance = useCallback(async () => {
+    try {
+      setIsRefreshingBalance(true);
+      await fetchBalance();
+    } finally {
+      setIsRefreshingBalance(false);
+    }
+  }, []);
+
+  const abrirCompra = useCallback((producto: NormalizedShopItem) => {
     if (producto.isPurchased) {
       Alert.alert('Ya comprado', 'Este articulo ya esta en tu cuenta.');
       return;
@@ -516,7 +592,13 @@ export default function StoreScreen() {
 
     setProductoSeleccionado(producto);
     setModalCompraVisible(true);
-  };
+  }, []);
+  const renderProductCard = useCallback(
+    ({ item: producto }: { item: NormalizedShopItem }) => (
+      <StoreProductCard producto={producto} isPurchasing={isPurchasing} onOpen={abrirCompra} />
+    ),
+    [abrirCompra, isPurchasing]
+  );
 
   const comprarProducto = async () => {
     if (!productoSeleccionado) return;
@@ -611,82 +693,56 @@ export default function StoreScreen() {
               <Ionicons name="cash" size={18} color="#FFD700" />
             </TouchableOpacity>
 
+            <TouchableOpacity
+              onPress={() => void refreshBalance()}
+              style={[styles.refreshBalanceButton, isRefreshingBalance && styles.buyButtonDisabled]}
+              disabled={isRefreshingBalance}>
+              <Ionicons
+                name="refresh-outline"
+                size={18}
+                color="#10212e"
+              />
+              <Text style={styles.refreshBalanceButtonText}>
+                {isRefreshingBalance ? '...' : 'Saldo'}
+              </Text>
+            </TouchableOpacity>
+
             <TouchableOpacity onPress={() => router.push('/profile')} style={styles.iconButton}>
               <Ionicons name="settings-outline" size={26} color="#FCEEB5" />
             </TouchableOpacity>
           </View>
         </View>
 
-        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-          <View style={styles.heroPanel}>
-            <Text style={styles.heroLabel}>Tienda diaria</Text>
-            <Text style={styles.heroTitle}>Ofertas privadas del dia</Text>
-          </View>
-
-          {isLoadingShop ? (
-            <View style={styles.statePanel}>
-              <ActivityIndicator color="#FCEEB5" />
-              <Text style={styles.stateText}>Cargando ofertas...</Text>
+        <FlatList
+          data={normalizedProducts}
+          keyExtractor={(item) => item.key}
+          numColumns={2}
+          initialNumToRender={8}
+          windowSize={5}
+          removeClippedSubviews
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.scrollContent}
+          ListHeaderComponent={
+            <View style={styles.heroPanel}>
+              <Text style={styles.heroLabel}>Tienda diaria</Text>
+              <Text style={styles.heroTitle}>Ofertas privadas del dia</Text>
             </View>
-          ) : normalizedProducts.length === 0 ? (
-            <View style={styles.statePanel}>
-              <Text style={styles.stateText}>No hay ofertas disponibles en este momento.</Text>
-            </View>
-          ) : (
-            <View style={styles.grid}>
-              {normalizedProducts.map((producto) => (
-                <View key={producto.key} style={styles.cardContainer}>
-                  <View style={[styles.cardMedia, { borderColor: producto.accent }]}>
-                    {producto.imageUrl ? (
-                      <Image source={{ uri: producto.imageUrl }} style={styles.cardImage} resizeMode="cover" />
-                    ) : (
-                      <>
-                        <Ionicons name={producto.icon} size={42} color={producto.accent} />
-                        <Text style={[styles.cardType, { color: producto.accent }]}>
-                          {ITEM_TYPE_LABELS[producto.type]}
-                        </Text>
-                      </>
-                    )}
-                    {producto.imageUrl ? (
-                      <View style={styles.imageTypeBadge}>
-                        <Text style={[styles.imageTypeBadgeText, { color: producto.accent }]}>
-                          {ITEM_TYPE_LABELS[producto.type]}
-                        </Text>
-                      </View>
-                    ) : null}
-                  </View>
-
-                  <Text style={styles.deckName}>{producto.name}</Text>
-                  <Text style={styles.deckDescription}>{producto.description}</Text>
-
-                  <View style={styles.cardFooter}>
-                    <View style={styles.priceContainer}>
-                      <Ionicons name="cash" size={16} color="#FFD700" />
-                      <Text style={styles.priceText}>{producto.price}</Text>
-                    </View>
-
-                    <TouchableOpacity
-                      style={[
-                        styles.buyButton,
-                        (!producto.purchaseItemId || producto.isPurchased || isPurchasing) && styles.buyButtonDisabled,
-                      ]}
-                      disabled={!producto.purchaseItemId || producto.isPurchased || isPurchasing}
-                      onPress={() => abrirCompra(producto)}
-                    >
-                      <Text style={styles.buyText}>
-                        {producto.isPurchased
-                          ? 'Comprado'
-                          : producto.purchaseItemId
-                            ? 'Comprar'
-                            : 'No disponible'}
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ))}
-            </View>
-          )}
-        </ScrollView>
+          }
+          ListEmptyComponent={
+            isLoadingShop ? (
+              <View style={styles.statePanel}>
+                <ActivityIndicator color="#FCEEB5" />
+                <Text style={styles.stateText}>Cargando ofertas...</Text>
+              </View>
+            ) : (
+              <View style={styles.statePanel}>
+                <Text style={styles.stateText}>No hay ofertas disponibles en este momento.</Text>
+              </View>
+            )
+          }
+          columnWrapperStyle={normalizedProducts.length > 0 ? styles.gridRow : undefined}
+          renderItem={renderProductCard}
+        />
 
         <Modal visible={modalCompraVisible} transparent animationType="fade">
           <View style={styles.modalOverlay}>
@@ -774,6 +830,21 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
+  refreshBalanceButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#A8C8C0',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 15,
+    marginRight: 6,
+  },
+  refreshBalanceButtonText: {
+    color: '#10212e',
+    fontSize: 13,
+    fontWeight: 'bold',
+  },
   scrollContent: {
     padding: 20,
     gap: 18,
@@ -811,11 +882,9 @@ const styles = StyleSheet.create({
     color: '#d7dce2',
     textAlign: 'center',
   },
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+  gridRow: {
     justifyContent: 'space-between',
-    gap: 14,
+    marginBottom: 14,
   },
   cardContainer: {
     width: '47%',

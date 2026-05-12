@@ -1,6 +1,6 @@
 import Constants from 'expo-constants';
 
-const DEFAULT_API_URL = 'http://10.63.201.253:3000/api';
+const DEFAULT_API_URL = 'https://api.keystudios.app/api';
 const extra = Constants.expoConfig?.extra ?? {};
 
 export const API_URL =

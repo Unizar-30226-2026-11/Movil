@@ -58,14 +58,14 @@ export function FruitBasketDuel({ duration, onComplete }: FruitBasketDuelProps) 
   const [remaining, setRemaining] = useState(duration);
   const [score, setScore] = useState(0);
   const [items, setItems] = useState<FallingItem[]>([]);
-  const [playfieldHeight, setPlayfieldHeight] = useState(360);
-  const [playfieldWidth, setPlayfieldWidth] = useState(300);
   const [basketX, setBasketX] = useState(103);
   const [combo, setCombo] = useState(0);
   const [lastEventText, setLastEventText] = useState('Recoge manzanas y esquiva bombas');
   const itemIdRef = useRef(0);
   const scoreRef = useRef(0);
   const basketXRef = useRef(103);
+  const playfieldHeightRef = useRef(360);
+  const playfieldWidthRef = useRef(300);
   const comboRef = useRef(0);
   const finishedRef = useRef(false);
 
@@ -90,13 +90,14 @@ export function FruitBasketDuel({ duration, onComplete }: FruitBasketDuelProps) 
     setLastEventText('Recoge manzanas y esquiva bombas');
     scoreRef.current = 0;
     comboRef.current = 0;
-    const initialBasketX = Math.max(18, playfieldWidth / 2 - BASKET_WIDTH / 2);
+    const initialBasketX = Math.max(18, playfieldWidthRef.current / 2 - BASKET_WIDTH / 2);
     setBasketX(initialBasketX);
     basketXRef.current = initialBasketX;
 
     const spawnInterval = setInterval(() => {
+      if (finishedRef.current) return;
       const nextKind: FallingItem['kind'] = Math.random() < 0.8 ? 'apple' : 'bomb';
-      const maxX = Math.max(24, playfieldWidth - ITEM_SIZE - 20);
+      const maxX = Math.max(24, playfieldWidthRef.current - ITEM_SIZE - 20);
 
       setItems((prev) => [
         ...prev,
@@ -111,6 +112,7 @@ export function FruitBasketDuel({ duration, onComplete }: FruitBasketDuelProps) 
     }, 360);
 
     const movementInterval = setInterval(() => {
+      if (finishedRef.current) return;
       setItems((prev) =>
         prev
           .map((item) => ({ ...item, y: item.y + item.speed }))
@@ -118,7 +120,7 @@ export function FruitBasketDuel({ duration, onComplete }: FruitBasketDuelProps) 
             const itemCenter = item.x + ITEM_SIZE / 2;
             const basketCenter = basketXRef.current + BASKET_WIDTH / 2;
             const caught =
-              item.y >= playfieldHeight - 92 &&
+              item.y >= playfieldHeightRef.current - 92 &&
               Math.abs(itemCenter - basketCenter) <= BASKET_WIDTH / 2;
 
             if (caught) {
@@ -145,7 +147,7 @@ export function FruitBasketDuel({ duration, onComplete }: FruitBasketDuelProps) 
               return false;
             }
 
-            if (item.y > playfieldHeight + 20) {
+            if (item.y > playfieldHeightRef.current + 20) {
               if (item.kind !== 'bomb') {
                 setCombo(0);
                 comboRef.current = 0;
@@ -164,6 +166,7 @@ export function FruitBasketDuel({ duration, onComplete }: FruitBasketDuelProps) 
           clearInterval(spawnInterval);
           clearInterval(movementInterval);
           clearInterval(timerInterval);
+          setItems([]);
           return 0;
         }
 
@@ -176,7 +179,7 @@ export function FruitBasketDuel({ duration, onComplete }: FruitBasketDuelProps) 
       clearInterval(movementInterval);
       clearInterval(timerInterval);
     };
-  }, [duration, onComplete, playfieldHeight, playfieldWidth]);
+  }, [duration]);
 
   useEffect(() => {
     if (remaining !== 0 || finishedRef.current) return;
@@ -186,28 +189,28 @@ export function FruitBasketDuel({ duration, onComplete }: FruitBasketDuelProps) 
 
   const updateBasketFromX = useCallback(
     (locationX: number) => {
-      if (!playfieldWidth) return;
-      const nextX = Math.max(8, Math.min(locationX - BASKET_WIDTH / 2, playfieldWidth - BASKET_WIDTH - 8));
+      if (finishedRef.current || remaining === 0 || !playfieldWidthRef.current) return;
+      const nextX = Math.max(8, Math.min(locationX - BASKET_WIDTH / 2, playfieldWidthRef.current - BASKET_WIDTH - 8));
       setBasketX(nextX);
     },
-    [playfieldWidth]
+    [remaining]
   );
 
   const panResponder = useMemo(
     () =>
       PanResponder.create({
-        onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: () => true,
+        onStartShouldSetPanResponder: () => !finishedRef.current && remaining > 0,
+        onMoveShouldSetPanResponder: () => !finishedRef.current && remaining > 0,
         onPanResponderTerminationRequest: () => false,
         onPanResponderGrant: (event) => updateBasketFromX(event.nativeEvent.locationX),
         onPanResponderMove: (event) => updateBasketFromX(event.nativeEvent.locationX),
       }),
-    [updateBasketFromX]
+    [remaining, updateBasketFromX]
   );
 
   const onLayout = (event: LayoutChangeEvent) => {
-    setPlayfieldHeight(event.nativeEvent.layout.height);
-    setPlayfieldWidth(event.nativeEvent.layout.width);
+    playfieldHeightRef.current = event.nativeEvent.layout.height;
+    playfieldWidthRef.current = event.nativeEvent.layout.width;
   };
 
   return (

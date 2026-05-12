@@ -1,16 +1,16 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFonts } from 'expo-font';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import * as SplashScreen from 'expo-splash-screen';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Animated,
   Alert,
+  Animated,
   Easing,
   Image,
   ImageBackground,
+  Modal,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -25,8 +25,6 @@ import Svg, { Text as SvgText } from 'react-native-svg';
 import { DuelMinigameModal } from '@/components/minigames/duel-minigame-modal';
 import { API_URL } from '@/constants/api';
 import { useGameSession } from '@/contexts/game-session-context';
-
-SplashScreen.preventAutoHideAsync();
 
 type HandCard = {
   id: number;
@@ -44,16 +42,119 @@ type PrivateHandItem = number | Record<string, any>;
 
 type StellaMarks = Record<string, number[]>;
 type StellaRoundScores = Record<string, number>;
+type PlayableConflictData = {
+  player1: string;
+  player2: string;
+  isDuel: boolean;
+  type: 0 | 1 | 2;
+  duration: number;
+};
+type ConflictLike = Partial<PlayableConflictData> | null | undefined;
+type HandModifierData = {
+  type?: string;
+  value?: number;
+  turnsLeft?: number;
+};
+type BoardTileLayout = {
+  x: number;
+  y: number;
+  size?: 'normal' | 'wide' | 'finish';
+};
+type BoardTileKind =
+  | 'normal'
+  | 'odd'
+  | 'even'
+  | 'bonus'
+  | 'shuffle'
+  | 'duel'
+  | 'checkpoint'
+  | 'finish';
 
 const COMPLETED_CONFLICT_STORAGE_KEY = 'completedConflictKey';
 const COMPLETED_CONFLICT_RESULT_STORAGE_KEY = 'completedConflictResult';
+const HAND_LIMIT_MINUS_IMAGE = require('../modificador_hand_limit.png');
+const HAND_LIMIT_PLUS_IMAGE = require('../modificar_hand_limit_plus.png');
 
 const FALLBACK_BOARD = Array.from({ length: 42 }, (_, index) => ({
   index: index + 1,
   type: [5, 7, 9, 10, 11, 18, 21, 25, 27, 31, 34, 37, 40].includes(index + 1) ? 'special' : 'normal',
 }));
+const BOARD_LAYOUT: Record<number, BoardTileLayout> = {
+  1: { x: 4, y: 3 }, 2: { x: 21, y: 5 }, 3: { x: 37, y: 2 }, 4: { x: 53, y: 5 }, 5: { x: 69, y: 2 }, 6: { x: 84, y: 6 },
+  12: { x: 6, y: 19 }, 11: { x: 20, y: 16 }, 10: { x: 38, y: 19 }, 9: { x: 52, y: 16 }, 8: { x: 68, y: 19 }, 7: { x: 84, y: 15 },
+  13: { x: 4, y: 33 }, 14: { x: 22, y: 31 }, 15: { x: 37, y: 34 }, 16: { x: 54, y: 31 }, 17: { x: 70, y: 34 }, 18: { x: 84, y: 30 },
+  24: { x: 6, y: 49 }, 23: { x: 20, y: 46 }, 22: { x: 38, y: 49 }, 21: { x: 52, y: 46 }, 20: { x: 68, y: 49 }, 19: { x: 84, y: 45 },
+  25: { x: 4, y: 63 }, 26: { x: 22, y: 61 }, 27: { x: 37, y: 64 }, 28: { x: 54, y: 61 }, 29: { x: 70, y: 64 }, 30: { x: 84, y: 60 },
+  36: { x: 6, y: 79 }, 35: { x: 20, y: 76 }, 34: { x: 38, y: 79 }, 33: { x: 52, y: 76 }, 32: { x: 68, y: 79 }, 31: { x: 84, y: 75 },
+  37: { x: 4, y: 92 }, 38: { x: 21, y: 89 }, 39: { x: 37, y: 93 }, 40: { x: 53, y: 89 }, 41: { x: 69, y: 92 }, 42: { x: 82, y: 90, size: 'finish' },
+};
+const TILE_KIND_BY_INDEX: Record<number, BoardTileKind> = {
+  5: 'odd',
+  7: 'even',
+  9: 'odd',
+  10: 'bonus',
+  11: 'even',
+  18: 'shuffle',
+  21: 'bonus',
+  25: 'duel',
+  27: 'checkpoint',
+  31: 'bonus',
+  34: 'shuffle',
+  37: 'bonus',
+  40: 'duel',
+  42: 'finish',
+};
 
 const normalizeCardId = (value: string | number) => Number(String(value).replace(/\D/g, ''));
+
+const normalizeConflictType = (value: unknown): 0 | 1 | 2 | null => {
+  const parsed = Number(value);
+  return parsed === 0 || parsed === 1 || parsed === 2 ? parsed : null;
+};
+
+const normalizeConflictDuration = (value: unknown): number | null => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
+const sameConflictParticipants = (left: ConflictLike, right: ConflictLike) => {
+  const leftKey = [left?.player1, left?.player2].filter(Boolean).map(String).sort().join(':');
+  const rightKey = [right?.player1, right?.player2].filter(Boolean).map(String).sort().join(':');
+  return Boolean(leftKey && rightKey && leftKey === rightKey);
+};
+
+const mergePlayableConflict = (
+  stateConflict: ConflictLike,
+  eventConflict: ConflictLike
+): PlayableConflictData | null => {
+  const participantSource =
+    stateConflict?.player1 && stateConflict?.player2 ? stateConflict : eventConflict;
+  const canUseEventDetails =
+    !stateConflict?.player1 ||
+    !stateConflict?.player2 ||
+    sameConflictParticipants(stateConflict, eventConflict);
+  const detailSource =
+    normalizeConflictType(stateConflict?.type) !== null && normalizeConflictDuration(stateConflict?.duration) !== null
+      ? stateConflict
+      : canUseEventDetails
+        ? eventConflict
+        : null;
+
+  const player1 = String(participantSource?.player1 ?? '').trim();
+  const player2 = String(participantSource?.player2 ?? '').trim();
+  const type = normalizeConflictType(detailSource?.type);
+  const duration = normalizeConflictDuration(detailSource?.duration);
+
+  if (!player1 || !player2 || type === null || duration === null) return null;
+
+  return {
+    player1,
+    player2,
+    isDuel: Boolean(participantSource?.isDuel ?? detailSource?.isDuel),
+    type,
+    duration,
+  };
+};
 
 const getImageUrl = (value: unknown) =>
   typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
@@ -120,6 +221,84 @@ const normalizeNumberList = (value: unknown): number[] =>
     ? value.map((item) => Number(item)).filter((item) => Number.isFinite(item))
     : [];
 
+const normalizeHandModifier = (value: unknown): HandModifierData | null => {
+  if (!value || typeof value !== 'object') return null;
+
+  const modifier = value as Record<string, unknown>;
+  const type = String(modifier.type ?? '').trim().toUpperCase();
+  const numericValue = Number(modifier.value ?? 0);
+  const turnsLeft = Number(modifier.turnsLeft ?? modifier.turns_left ?? 0);
+
+  if (type !== 'HAND_LIMIT' || !Number.isFinite(numericValue) || numericValue === 0) {
+    return null;
+  }
+
+  return {
+    type,
+    value: numericValue,
+    turnsLeft: Number.isFinite(turnsLeft) ? turnsLeft : 0,
+  };
+};
+
+const getTileKind = (tileIndex: number, tileType: unknown): BoardTileKind => {
+  const normalizedType = String(tileType ?? '').trim().toLowerCase();
+
+  if (normalizedType.includes('finish') || normalizedType.includes('meta')) return 'finish';
+  if (normalizedType.includes('duel')) return 'duel';
+  if (normalizedType.includes('shuffle') || normalizedType.includes('swap')) return 'shuffle';
+  if (normalizedType.includes('checkpoint') || normalizedType.includes('balance')) return 'checkpoint';
+  if (normalizedType.includes('bonus') || normalizedType.includes('mode')) return 'bonus';
+  if (normalizedType.includes('odd') || normalizedType.includes('impar')) return 'odd';
+  if (normalizedType.includes('even') || normalizedType.includes('par')) return 'even';
+
+  return TILE_KIND_BY_INDEX[tileIndex] ?? 'normal';
+};
+
+const getTileIconName = (tileKind: BoardTileKind) => {
+  switch (tileKind) {
+    case 'bonus': return 'star';
+    case 'shuffle': return 'shuffle';
+    case 'duel': return 'flash';
+    default: return null;
+  }
+};
+
+const getTileBadgeText = (tileKind: BoardTileKind) => {
+  switch (tileKind) {
+    case 'odd': return '+/-';
+    case 'even': return '-/+';
+    case 'checkpoint': return 'EQ';
+    case 'finish': return 'FIN';
+    default: return null;
+  }
+};
+
+const extractCurrentUserHandModifier = (
+  activeModifiers: unknown,
+  currentUserId: string
+): HandModifierData | null => {
+  if (!activeModifiers || typeof activeModifiers !== 'object' || !currentUserId) return null;
+
+  const modifiers = activeModifiers as Record<string, unknown>;
+  const directModifier = normalizeHandModifier(modifiers[currentUserId]);
+  if (directModifier) return directModifier;
+
+  const nestedModifiers =
+    modifiers.hand_modifiers ??
+    modifiers.handModifiers ??
+    modifiers.players ??
+    null;
+
+  if (nestedModifiers && typeof nestedModifiers === 'object') {
+    const nestedModifier = normalizeHandModifier(
+      (nestedModifiers as Record<string, unknown>)[currentUserId]
+    );
+    if (nestedModifier) return nestedModifier;
+  }
+
+  return null;
+};
+
 const extractCollections = (payload: any) => {
   if (Array.isArray(payload?.collections?.collections)) return payload.collections.collections;
   if (Array.isArray(payload?.collections)) return payload.collections;
@@ -180,25 +359,52 @@ export default function GameScreen() {
   const [pendingScore, setPendingScore] = useState<number | null>(null);
   const [showConflictModal, setShowConflictModal] = useState(true);
   const [completedConflictKey, setCompletedConflictKey] = useState<string | null>(null);
+  const completedConflictKeyRef = useRef<string | null>(null);
   const [pendingActionType, setPendingActionType] = useState<string | null>(null);
   const [catalogCardUrls, setCatalogCardUrls] = useState<Record<string, string>>({});
   const [knownCardUrls, setKnownCardUrls] = useState<Record<string, string>>({});
+  const [lastKnownStellaPrompt, setLastKnownStellaPrompt] = useState('');
   const [boardImageFailed, setBoardImageFailed] = useState(false);
   const [lastKnownBoardImageUrl, setLastKnownBoardImageUrl] = useState<string | null>(null);
+  const [boardInspectorMode, setBoardInspectorMode] = useState<'clue' | 'board'>('clue');
   const [chatOpen, setChatOpen] = useState(false);
   const [chatText, setChatText] = useState('');
   const emitGameActionRef = useRef(emitGameAction);
   const starProgress = useRef(new Animated.Value(0)).current;
+  const modeShiftPulse = useRef(new Animated.Value(0)).current;
   const chatPanelProgress = useRef(new Animated.Value(0)).current;
   const { width: viewportWidth, height: viewportHeight } = useWindowDimensions();
 
   useEffect(() => {
-    if (loaded || error) SplashScreen.hideAsync();
-  }, [loaded, error]);
-
-  useEffect(() => {
     emitGameActionRef.current = emitGameAction;
   }, [emitGameAction]);
+
+  useEffect(() => {
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(modeShiftPulse, {
+          toValue: 1,
+          duration: 1400,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(modeShiftPulse, {
+          toValue: 0,
+          duration: 1400,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ])
+    );
+
+    animation.start();
+
+    return () => {
+      animation.stop();
+      modeShiftPulse.stopAnimation();
+      modeShiftPulse.setValue(0);
+    };
+  }, [modeShiftPulse]);
 
   useEffect(() => {
     Animated.timing(chatPanelProgress, {
@@ -271,7 +477,7 @@ export default function GameScreen() {
           })
         );
 
-        let ownedCardEntries: Array<readonly [string, string]> = [];
+        let ownedCardEntries: readonly [string, string][] = [];
         try {
           const ownedCardsResponse = await fetch(`${API_URL}/users/cards`, {
             headers: { Authorization: `Bearer ${token}` },
@@ -286,7 +492,7 @@ export default function GameScreen() {
                 if (!id || typeof url !== 'string' || !url.trim()) return null;
                 return [String(id), url] as const;
               })
-              .filter(Boolean) as Array<readonly [string, string]>;
+              .filter(Boolean) as readonly [string, string][];
           }
         } catch {}
 
@@ -340,11 +546,11 @@ export default function GameScreen() {
   const resolvedLobbyCode = String(currentLobbyCode ?? activeGameId ?? params.lobbyCode ?? params.gameId ?? '');
   const currentPhase = String(gameState?.phase ?? 'WAITING');
   const currentRound = gameState?.currentRound;
-  const visibleRoundPrompt = String(currentRound?.clue ?? currentRound?.word ?? '').trim();
+  const liveRoundPrompt = String(currentRound?.clue ?? currentRound?.word ?? '').trim();
   const storytellerId = String(currentRound?.storytellerId ?? '');
   const isStoryteller = storytellerId === currentUserId;
-  const playedCards = currentRound?.playedCards ?? {};
-  const votes = currentRound?.votes ?? [];
+  const playedCards = useMemo(() => currentRound?.playedCards ?? {}, [currentRound?.playedCards]);
+  const votes = useMemo(() => currentRound?.votes ?? [], [currentRound?.votes]);
   const storytellerAlreadyPlayed =
     currentRound?.storytellerCardId != null || playedCards[storytellerId] != null;
   const playerAlreadySubmitted = playedCards[currentUserId] != null;
@@ -354,8 +560,34 @@ export default function GameScreen() {
   const playerAlreadyVoted =
     votes.some((vote) => vote.voterId === currentUserId) || hasRecoveredSelectedVote;
   const scores = gameState?.scores ?? {};
+  const playerNames = useMemo(
+    () =>
+      gameState?.playerNames && typeof gameState.playerNames === 'object'
+        ? gameState.playerNames
+        : {},
+    [gameState?.playerNames]
+  );
+  const getPlayerName = useCallback(
+    (playerId?: string | null, options?: { self?: boolean }) => {
+      const safeId = String(playerId ?? '').trim();
+      if (!safeId) return 'Jugador';
+      if (options?.self && safeId === currentUserId) return 'Tu';
+      const resolvedName = String(playerNames[safeId] ?? '').trim();
+      return resolvedName || safeId;
+    },
+    [currentUserId, playerNames]
+  );
+  const getPlayerBadgeName = useCallback(
+    (playerId?: string | null) => {
+      if (playerId === currentUserId) return 'TU';
+      const name = getPlayerName(playerId);
+      return name.slice(0, 3).toUpperCase();
+    },
+    [currentUserId, getPlayerName]
+  );
   const players = (gameState?.players ?? []).map((playerId) => ({
     id: String(playerId),
+    name: getPlayerName(String(playerId)),
     score: scores[String(playerId)] ?? 0,
     connected: !(gameState?.disconnectedPlayers ?? []).includes(String(playerId)),
   }));
@@ -411,17 +643,23 @@ export default function GameScreen() {
   const boardCards = useMemo<BoardCard[]>(
     () => {
       if (Array.isArray(boardCardsDetailed) && boardCardsDetailed.length > 0) {
-        return boardCardsDetailed
-          .map((card) => {
-            const id = normalizeCardId(card.id ?? card.cardId ?? card.id_card ?? '');
-            const url = typeof card.url_image === 'string' && card.url_image.trim().length > 0
-              ? card.url_image
-              : null;
-            const playerId = String(card.playerId ?? card.player_id ?? card.ownerId ?? card.owner_id ?? card.playedBy ?? '').trim();
+        return boardCardsDetailed.reduce<BoardCard[]>((acc, card) => {
+          const id = normalizeCardId(card.id ?? card.cardId ?? card.id_card ?? '');
+          const url = typeof card.url_image === 'string' && card.url_image.trim().length > 0
+            ? card.url_image
+            : null;
+          const playerId = String(card.playerId ?? card.player_id ?? card.ownerId ?? card.owner_id ?? card.playedBy ?? '').trim();
 
-            return Number.isFinite(id) && id > 0 ? { id, url_image: url, playerId: playerId || undefined } : null;
-          })
-          .filter((card): card is BoardCard => Boolean(card));
+          if (Number.isFinite(id) && id > 0) {
+            const newCard: BoardCard = { id, url_image: url };
+            if (playerId) {
+              newCard.playerId = playerId;
+            }
+            acc.push(newCard);
+          }
+
+          return acc;
+        }, []);
       }
 
       return (currentRound?.boardCards ?? [])
@@ -506,6 +744,11 @@ export default function GameScreen() {
   const hasSubmittedStellaMarks = myStellaMarks.length > 0;
   const isCurrentStellaScout = stellaCurrentScoutId === currentUserId;
   const hasCurrentUserFallen = stellaFallenPlayers.includes(currentUserId);
+  const visibleRoundPrompt = isStellaMode
+    ? liveRoundPrompt || lastKnownStellaPrompt
+    : liveRoundPrompt;
+  const effectiveStellaPrompt = (stellaWord || liveRoundPrompt || lastKnownStellaPrompt).trim();
+  const currentHandModifier = extractCurrentUserHandModifier(gameState?.activeModifiers, currentUserId);
 
   const normalizedPlayedCards = useMemo(
     () =>
@@ -534,6 +777,17 @@ export default function GameScreen() {
 
     return boardCards;
   }, [boardCards, knownCardUrls, normalizedPlayedCards]);
+  const voteCountsByCardId = useMemo(
+    () =>
+      votes.reduce<Record<string, number>>((acc, vote) => {
+        const targetCardId = normalizeCardId(vote.targetCardId);
+        if (!Number.isFinite(targetCardId)) return acc;
+        const key = String(targetCardId);
+        acc[key] = (acc[key] ?? 0) + 1;
+        return acc;
+      }, {}),
+    [votes]
+  );
   const voteableBoardCards = playedBoardCards.filter((card) => card.playerId !== currentUserId);
   const storytellerBoardCards = playedBoardCards.filter((card) => card.playerId !== currentUserId);
   const boardTiles = Array.isArray(gameState?.board?.tiles) && gameState.board.tiles.length > 0 ? gameState.board.tiles : FALLBACK_BOARD;
@@ -541,11 +795,20 @@ export default function GameScreen() {
   const boardImageUrl = currentBoardImageUrl ?? lastKnownBoardImageUrl;
   const boardHasOverlay = Boolean(boardImageUrl && !boardImageFailed);
 
-  const activeConflictData = gameState?.activeConflict ?? activeConflict ?? null;
+  const playableConflictData = mergePlayableConflict(gameState?.activeConflict, activeConflict);
+  const activeConflictData = playableConflictData ?? gameState?.activeConflict ?? activeConflict ?? null;
   const activeConflictKey = activeConflictData
-    ? `${activeConflictData.player1}:${activeConflictData.player2}:${activeConflictData.isDuel ? 'duel' : 'tie'}`
+    ? (() => {
+        const participantKey = [activeConflictData.player1, activeConflictData.player2]
+          .filter(Boolean)
+          .sort()
+          .join(':');
+        const conflictType = playableConflictData?.type ?? activeConflict?.type ?? gameState?.activeConflict?.type ?? 'pending';
+        const conflictMode = activeConflictData.isDuel ? 'duel' : 'tie';
+        return `${participantKey}:${conflictType}:${conflictMode}`;
+      })()
     : null;
-  const activeConflictDuration = activeConflictData?.duration;
+  const activeConflictDuration = playableConflictData?.duration ?? activeConflict?.duration ?? gameState?.activeConflict?.duration;
   const isParticipant =
     activeConflictData?.player1 === currentUserId || activeConflictData?.player2 === currentUserId;
   const fallbackWinnerId = gameState?.winners?.[0] ?? players.slice().sort((a, b) => b.score - a.score)[0]?.id;
@@ -557,8 +820,8 @@ export default function GameScreen() {
   const formatSpecialEvent = () => {
     if (!latestSpecialEvent) return '';
 
-    const playerLabel = latestSpecialEvent.pId ?? 'Un jugador';
-    const targetLabel = typeof latestSpecialEvent.targetId === 'string' ? latestSpecialEvent.targetId : 'otro jugador';
+    const playerLabel = latestSpecialEvent.pId ? getPlayerName(latestSpecialEvent.pId) : 'Un jugador';
+    const targetLabel = typeof latestSpecialEvent.targetId === 'string' ? getPlayerName(latestSpecialEvent.targetId) : 'otro jugador';
     const points = Number(latestSpecialEvent.points ?? 0);
     const signedPoints = points > 0 ? `+${points}` : String(points);
 
@@ -585,13 +848,24 @@ export default function GameScreen() {
       default:
         return typeof latestSpecialEvent.message === 'string'
           ? latestSpecialEvent.message
-          : `${latestSpecialEvent.effect ?? 'Evento especial'}${latestSpecialEvent.pId ? ` para ${latestSpecialEvent.pId}` : ''}.`;
+          : `${latestSpecialEvent.effect ?? 'Evento especial'}${latestSpecialEvent.pId ? ` para ${getPlayerName(latestSpecialEvent.pId)}` : ''}.`;
     }
   };
 
   useEffect(() => {
     setSelectedStellaCardIds([]);
   }, [stellaBoardKey]);
+
+  useEffect(() => {
+    if (!isStellaMode) {
+      setLastKnownStellaPrompt('');
+      return;
+    }
+
+    if (liveRoundPrompt) {
+      setLastKnownStellaPrompt(liveRoundPrompt);
+    }
+  }, [isStellaMode, liveRoundPrompt]);
 
   useEffect(() => {
     setBoardImageFailed(false);
@@ -677,12 +951,17 @@ export default function GameScreen() {
       setShowConflictModal(false);
       setPendingScore(null);
       setCompletedConflictKey(null);
+      completedConflictKeyRef.current = null;
       void AsyncStorage.removeItem(COMPLETED_CONFLICT_STORAGE_KEY);
       void AsyncStorage.removeItem(COMPLETED_CONFLICT_RESULT_STORAGE_KEY);
       return;
     }
 
-    if (isParticipant && completedConflictKey !== activeConflictKey) {
+    if (
+      isParticipant &&
+      completedConflictKey !== activeConflictKey &&
+      completedConflictKeyRef.current !== activeConflictKey
+    ) {
       setShowConflictModal(true);
     }
   }, [activeConflictData, activeConflictKey, completedConflictKey, isParticipant]);
@@ -695,6 +974,7 @@ export default function GameScreen() {
       const storedConflictResult = await AsyncStorage.getItem(COMPLETED_CONFLICT_RESULT_STORAGE_KEY);
 
       if (storedConflictKey === activeConflictKey) {
+        completedConflictKeyRef.current = activeConflictKey;
         setCompletedConflictKey(activeConflictKey);
         if (storedConflictResult) {
           const parsed = Number(storedConflictResult);
@@ -800,6 +1080,110 @@ export default function GameScreen() {
     setChatText('');
   };
 
+  const renderBoardInspector = () => {
+    const getTileColors = (kind: BoardTileKind) => {
+      switch(kind) {
+        case 'odd': return { bg: '#ea72bd', border: '#973070', text: '#5b143d', badgeBg: 'rgba(255, 239, 249, 0.92)' };
+        case 'even': return { bg: '#6dafee', border: '#2e68a5', text: '#173d68', badgeBg: 'rgba(238, 247, 255, 0.94)' };
+        case 'bonus': return { bg: '#a69cff', border: '#5d50c4', text: '#172056', badgeBg: 'rgba(238, 250, 255, 0.96)' };
+        case 'shuffle': return { bg: '#9f78df', border: '#6536a4', text: '#401568', badgeBg: 'rgba(247, 239, 255, 0.94)' };
+        case 'duel': return { bg: '#e86d5b', border: '#972d21', text: '#5a1912', badgeBg: 'rgba(255, 241, 238, 0.94)' };
+        case 'checkpoint': return { bg: '#62cacd', border: '#23777b', text: '#113d3f', badgeBg: 'rgba(238, 255, 255, 0.94)' };
+        case 'finish': return { bg: '#f3b948', border: '#5f3d09', text: '#4b2a05', badgeBg: 'rgba(255, 253, 226, 0.84)' };
+        default: return { bg: '#b8dda9', border: '#2b7940', text: '#183b23', badgeBg: 'rgba(255, 255, 255, 0.88)' };
+      }
+    };
+
+    return (
+      <View style={styles.boardCanvas}>
+        {boardImageUrl ? (
+          <Image
+            source={{ uri: boardImageUrl }}
+            style={styles.boardPreviewOverlay}
+            resizeMode="cover"
+            onError={() => setBoardImageFailed(true)}
+            onLoad={() => setBoardImageFailed(false)}
+          />
+        ) : null}
+        <View style={styles.boardGrid}>
+          {boardTiles.map((tile: any, index) => {
+            const tileIndex = tile.index ?? tile.numero ?? index + 1;
+            const tileType = tile.type ?? tile.tipo ?? 'normal';
+            const tileKind = getTileKind(tileIndex, tileType);
+            const occupants = players.filter((player) => Math.max(1, player.score) === tileIndex);
+            const tileLayout = BOARD_LAYOUT[tileIndex] ?? {
+              x: 6 + ((index % 7) * 9),
+              y: Math.floor(index / 7) * 18,
+              size: 'normal' as const,
+            };
+            const tileIconName = getTileIconName(tileKind);
+            const tileBadgeText = getTileBadgeText(tileKind);
+            const isDiamond = tileKind === 'bonus' || tileKind === 'shuffle';
+            const colors = getTileColors(tileKind);
+
+            return (
+              <Animated.View
+                key={`${tileIndex}-${index}`}
+                style={[
+                  styles.boardTile,
+                  tileLayout.size === 'wide' && styles.boardTileWide,
+                  tileKind === 'finish' && styles.boardTileFinish,
+                  isDiamond && styles.boardTileShapeDiamond,
+                  boardHasOverlay && styles.boardTileOverlay,
+                  {
+                    left: `${tileLayout.x}%`,
+                    top: `${tileLayout.y}%`,
+                    backgroundColor: colors.bg,
+                    borderColor: colors.border,
+                    transform: [
+                      ...(isDiamond ? [{ rotate: '45deg' }] : []),
+                      ...(tileKind === 'bonus' ? [{
+                        scale: modeShiftPulse.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [1, 1.06],
+                        }),
+                      }] : [])
+                    ]
+                  },
+                ]}
+              >
+                <View style={[styles.boardTileInnerLayer, isDiamond && styles.boardTileInnerLayerDiamond]}>
+                  <View style={[styles.boardTileContent, isDiamond && styles.boardTileContentCounterRotate]}>
+                    <Text style={[styles.boardTileIndex, { color: colors.text }]}>{tileIndex}</Text>
+
+                    {tileIconName || (tileBadgeText) ? (
+                      <View style={[styles.boardTileBadge, { backgroundColor: colors.badgeBg }]}>
+                        {tileIconName ? (
+                          <Ionicons name={tileIconName} size={11} color={colors.text} />
+                        ) : (
+                          <Text style={[styles.boardTileBadgeText, { color: colors.text }]}>{tileBadgeText}</Text>
+                        )}
+                      </View>
+                    ) : null}
+
+                    {occupants.length > 0 ? (
+                      <View style={styles.tileOccupants}>
+                        {occupants.map((player) => {
+                          return (
+                            <View key={player.id} style={styles.tileBadge}>
+                              <Text style={styles.tileBadgeText}>
+                                {getPlayerBadgeName(player.id)}
+                              </Text>
+                            </View>
+                          );
+                        })}
+                      </View>
+                    ) : null}
+                  </View>
+                </View>
+              </Animated.View>
+            );
+          })}
+        </View>
+      </View>
+    );
+  };
+
   const getCardImageUrl = (cardId: number) => {
     const url = cardUrlMap[String(cardId)] ?? cardUrlMap[cardId];
     return typeof url === 'string' && url.trim().length > 0 ? url : null;
@@ -880,37 +1264,6 @@ export default function GameScreen() {
     setPendingActionType('STELLA_REVEAL_MARK');
   };
 
-  const startStellaRound = () => {
-    if (currentPhase !== 'STELLA_WORD_REVEAL' || gameState?.isMinigameActive || pendingActionType) return;
-
-    const emitted = emitGameAction({
-      actionType: 'NEXT_ROUND',
-    }, resolvedLobbyCode);
-
-    if (!emitted) {
-      Alert.alert('Conexion', 'No se pudo empezar la ronda porque el socket no esta conectado.');
-      return;
-    }
-
-    setPendingActionType('NEXT_ROUND');
-  };
-
-  const goNextRound = () => {
-    if (currentPhase !== 'SCORING' || gameState?.isMinigameActive) return;
-    if (pendingActionType) return;
-
-    const emitted = emitGameAction({
-      actionType: 'NEXT_ROUND',
-    }, resolvedLobbyCode);
-
-    if (!emitted) {
-      Alert.alert('Conexion', 'No se pudo avanzar la ronda porque el socket no esta conectado.');
-      return;
-    }
-
-    setPendingActionType('NEXT_ROUND');
-  };
-
   const acceptModeChangeOffer = () => {
     if (!modeChangeOffer || pendingActionType || currentPhase !== 'SCORING') return;
 
@@ -949,30 +1302,6 @@ export default function GameScreen() {
       clearModeChangeOffer();
     }
   }, [clearModeChangeOffer, currentPhase, modeChangeOffer]);
-
-  useEffect(() => {
-    if (
-      currentPhase !== 'SCORING' ||
-      gameState?.isMinigameActive ||
-      pendingActionType ||
-      modeChangeOffer ||
-      !resolvedLobbyCode
-    ) return;
-
-    const timeout = setTimeout(() => {
-      emitGameActionRef.current({
-        actionType: 'NEXT_ROUND',
-      }, resolvedLobbyCode);
-    }, 12000);
-
-    return () => clearTimeout(timeout);
-  }, [
-    currentPhase,
-    gameState?.isMinigameActive,
-    modeChangeOffer,
-    pendingActionType,
-    resolvedLobbyCode,
-  ]);
 
   const leaveFinishedGame = async () => {
     await AsyncStorage.removeItem(COMPLETED_CONFLICT_STORAGE_KEY);
@@ -1030,7 +1359,7 @@ export default function GameScreen() {
         <View key={`stella-score-${player.id}`} style={[styles.resultRow, player.id === currentUserId && styles.resultRowSelf]}>
           <View>
             <Text style={styles.resultName}>
-              {player.id}
+              {player.name}
               {player.id === currentUserId ? ' (tu)' : ''}
             </Text>
             <Text style={styles.resultMeta}>
@@ -1043,6 +1372,47 @@ export default function GameScreen() {
     </View>
   );
 
+  const renderVoteSummary = () => {
+    if (playedBoardCards.length === 0) {
+      return <Text style={styles.emptyText}>Todavia no han llegado las cartas jugadas.</Text>;
+    }
+
+    return (
+      <View style={styles.voteSummaryGrid}>
+        {playedBoardCards.map((card, index) => {
+          const imageUrl =
+            typeof card.url_image === 'string' && card.url_image.trim().length > 0
+              ? card.url_image
+              : getCardImageUrl(card.id);
+          const voteCount = voteCountsByCardId[String(card.id)] ?? 0;
+          const ownerName = card.playerId ? getPlayerName(card.playerId) : '';
+
+          return (
+            <View key={`scoring-card-${card.playerId ?? 'card'}-${card.id}-${index}`} style={styles.voteSummaryCard}>
+              {imageUrl ? (
+                <Image source={{ uri: imageUrl }} style={styles.voteSummaryImage} />
+              ) : (
+                <View style={styles.placeholderCardFace}>
+                  <Text style={styles.boardCardLabel}>Carta</Text>
+                  <Text style={styles.boardCardId}>{card.id}</Text>
+                </View>
+              )}
+              <View style={styles.voteSummaryBadge}>
+                <Text style={styles.voteSummaryBadgeText}>{voteCount}</Text>
+                <Ionicons name="checkmark-circle" size={14} color="#10212e" />
+              </View>
+              {ownerName ? (
+                <View style={styles.voteSummaryOwner}>
+                  <Text style={styles.voteSummaryOwnerText} numberOfLines={1}>{ownerName}</Text>
+                </View>
+              ) : null}
+            </View>
+          );
+        })}
+      </View>
+    );
+  };
+
   const renderStellaPhasePanel = () => {
     const submittedPlayersCount = Object.keys(stellaPlayerMarks).length;
     const revealableMarks = myStellaMarks.filter((cardId) => !stellaRevealedCards.includes(cardId));
@@ -1051,17 +1421,13 @@ export default function GameScreen() {
       return (
         <View style={styles.panel}>
           <Text style={styles.sectionLabel}>Stella: palabra de la ronda</Text>
-          <Text style={styles.stellaWord}>{stellaWord || 'Esperando palabra...'}</Text>
-          <Text style={styles.noticeText}>Cuando el backend abra la ronda podras marcar entre 1 y 10 cartas.</Text>
-          <TouchableOpacity
-            style={[styles.actionButton, (!isSocketConnected || !!pendingActionType) && styles.actionButtonDisabled]}
-            disabled={!isSocketConnected || !!pendingActionType}
-            onPress={startStellaRound}
-          >
-            <Text style={styles.actionButtonText}>
-              {pendingActionType === 'NEXT_ROUND' ? 'Empezando...' : 'Empezar marcaje'}
-            </Text>
-          </TouchableOpacity>
+          <Text style={styles.stellaWord}>{effectiveStellaPrompt || 'Esperando palabra...'}</Text>
+          <Text style={styles.noticeText}>
+            Cuando el backend abra la ronda podras marcar entre 1 y 10 cartas.
+          </Text>
+          <Text style={styles.noticeText}>
+            Esperando al temporizador del servidor para iniciar el marcaje.
+          </Text>
         </View>
       );
     }
@@ -1073,7 +1439,7 @@ export default function GameScreen() {
             <Text style={styles.sectionLabel}>Stella: marca cartas</Text>
             <Text style={styles.mutedText}>{hasSubmittedStellaMarks ? 'Enviado' : `${selectedStellaCardIds.length}/10`}</Text>
           </View>
-          <Text style={styles.stellaWord}>{stellaWord || 'Sin palabra'}</Text>
+          <Text style={styles.stellaWord}>{effectiveStellaPrompt || 'Sin palabra'}</Text>
           <Text style={styles.noticeText}>
             {hasSubmittedStellaMarks
               ? `Tus marcas estan enviadas. Esperando jugadores: ${submittedPlayersCount}/${players.length}.`
@@ -1117,16 +1483,16 @@ export default function GameScreen() {
             <Text style={styles.sectionLabel}>Stella: revelar marcas</Text>
             <Text style={styles.mutedText}>{stellaRevealedCards.length} reveladas</Text>
           </View>
-          <Text style={styles.stellaWord}>{stellaWord || 'Sin palabra'}</Text>
+          <Text style={styles.stellaWord}>{effectiveStellaPrompt || 'Sin palabra'}</Text>
           <Text style={styles.noticeText}>
             {isCurrentStellaScout
               ? hasCurrentUserFallen
                 ? 'Has caido esta ronda. Espera al resto.'
                 : 'Es tu turno. Revela una de tus cartas marcadas.'
-              : `Turno de ${stellaCurrentScoutId || 'otro jugador'}.`}
+              : `Turno de ${stellaCurrentScoutId ? getPlayerName(stellaCurrentScoutId) : 'otro jugador'}.`}
           </Text>
           {stellaInTheDarkPlayerId ? (
-            <Text style={styles.noticeText}>En la sombra: {stellaInTheDarkPlayerId}</Text>
+            <Text style={styles.noticeText}>En la sombra: {getPlayerName(stellaInTheDarkPlayerId)}</Text>
           ) : null}
           <View style={styles.stellaCardGrid}>
             {stellaBoardCardIds.map((cardId, index) => {
@@ -1148,7 +1514,7 @@ export default function GameScreen() {
             <Text style={styles.noticeText}>Ya no tienes marcas pendientes.</Text>
           ) : null}
           {stellaFallenPlayers.length > 0 ? (
-            <Text style={styles.noticeText}>Caidos: {stellaFallenPlayers.join(', ')}</Text>
+            <Text style={styles.noticeText}>Caidos: {stellaFallenPlayers.map((playerId) => getPlayerName(playerId)).join(', ')}</Text>
           ) : null}
         </View>
       );
@@ -1158,13 +1524,11 @@ export default function GameScreen() {
       return (
         <View style={styles.panel}>
           <Text style={styles.sectionLabel}>Stella: puntuacion de ronda</Text>
-          <Text style={styles.noticeText}>Palabra: {stellaWord || 'sin palabra'}</Text>
+          <Text style={styles.noticeText}>Palabra: {effectiveStellaPrompt || 'sin palabra'}</Text>
           {renderStellaScoreRows()}
-          <TouchableOpacity style={[styles.actionButton, (!isSocketConnected || !!pendingActionType) && styles.actionButtonDisabled]} disabled={!isSocketConnected || !!pendingActionType} onPress={goNextRound}>
-            <Text style={styles.actionButtonText}>
-              {pendingActionType === 'NEXT_ROUND' ? 'Avanzando...' : 'Siguiente ronda'}
-            </Text>
-          </TouchableOpacity>
+          <Text style={styles.noticeText}>
+            Esperando siguiente ronda...
+          </Text>
         </View>
       );
     }
@@ -1177,7 +1541,7 @@ export default function GameScreen() {
             {didCurrentUserWin
               ? 'Enhorabuena, has terminado en primera posicion.'
               : finalWinnerId
-                ? `Ha ganado ${finalWinnerId}.`
+                ? `Ha ganado ${getPlayerName(finalWinnerId)}.`
                 : 'Ya hay un ganador. Puedes revisar la puntuacion final abajo.'}
           </Text>
         </View>
@@ -1202,7 +1566,7 @@ export default function GameScreen() {
       );
     }
 
-    // Si hay un minijuego activo, mostrar panel específico y no la fase normal
+    // Si hay un minijuego activo, mostrar panel especifico y no la fase normal
     if (gameState.isMinigameActive) {
       return (
         <View style={styles.panel}>
@@ -1215,7 +1579,7 @@ export default function GameScreen() {
                   : activeConflict
                     ? 'Te toca resolver un conflicto. Si no ves el minijuego, espera un momento o reabre la partida.'
                     : 'Hay un conflicto activo. Esperando a recuperar el minijuego correcto.'
-                : `Duelo entre ${activeConflictData.player1} y ${activeConflictData.player2}`
+                : `Duelo entre ${getPlayerName(activeConflictData.player1)} y ${getPlayerName(activeConflictData.player2)}`
               : 'Espera a que termine el minijuego...'}
           </Text>
         </View>
@@ -1238,7 +1602,7 @@ export default function GameScreen() {
               placeholder="Escribe la pista de la ronda"
               placeholderTextColor="#7b8a97"
             />
-            <Text style={styles.noticeText}>Selecciona una carta de tu mano y envíala con la pista.</Text>
+            <Text style={styles.noticeText}>Selecciona una carta de tu mano y enviala con la pista.</Text>
             <TouchableOpacity
               style={[styles.actionButton, (!selectedHandCardId || !storyClue.trim() || !isSocketConnected || !!pendingActionType || storytellerAlreadyPlayed) && styles.actionButtonDisabled]}
               disabled={!selectedHandCardId || !storyClue.trim() || !isSocketConnected || !!pendingActionType || storytellerAlreadyPlayed}
@@ -1259,7 +1623,7 @@ export default function GameScreen() {
       return (
         <View style={styles.panel}>
           <Text style={styles.sectionLabel}>Esperando la pista</Text>
-          <Text style={styles.noticeText}>El storyteller actual es {storytellerId || 'otro jugador'}.</Text>
+          <Text style={styles.noticeText}>El storyteller actual es {storytellerId ? getPlayerName(storytellerId) : 'otro jugador'}.</Text>
         </View>
       );
     }
@@ -1268,7 +1632,7 @@ export default function GameScreen() {
       if (!isStoryteller) {
       return (
         <View style={styles.panel}>
-          <Text style={styles.sectionLabel}>Envía tu carta</Text>
+          <Text style={styles.sectionLabel}>Envia tu carta</Text>
             <TouchableOpacity
               style={[styles.actionButton, (!selectedHandCardId || !isSocketConnected || !!pendingActionType || playerAlreadySubmitted) && styles.actionButtonDisabled]}
               disabled={!selectedHandCardId || !isSocketConnected || !!pendingActionType || playerAlreadySubmitted}
@@ -1318,24 +1682,22 @@ export default function GameScreen() {
 
       return (
         <View style={styles.panel}>
-          <Text style={styles.sectionLabel}>Votación en curso</Text>
+          <Text style={styles.sectionLabel}>Votacion en curso</Text>
           <Text style={styles.noticeText}>Espera a que el resto vote tu carta.</Text>
         </View>
       );
     }
 
     if (currentPhase === 'SCORING') {
-      
       return (
         <View style={styles.panel}>
-          <Text style={styles.sectionLabel}>Puntuación de la ronda</Text>
-          <Text style={styles.noticeText}>Cartas jugadas: {Object.keys(currentRound?.playedCards ?? {}).length}</Text>
+          <Text style={styles.sectionLabel}>Puntuacion de la ronda</Text>
+          <Text style={styles.noticeText}>Resumen de votos emitidos en la mesa.</Text>
+          {renderVoteSummary()}
           <Text style={styles.noticeText}>Votos emitidos: {(currentRound?.votes ?? []).length}</Text>
-          <TouchableOpacity style={[styles.actionButton, (!isSocketConnected || !!pendingActionType) && styles.actionButtonDisabled]} disabled={!isSocketConnected || !!pendingActionType} onPress={goNextRound}>
-            <Text style={styles.actionButtonText}>
-              {pendingActionType === 'NEXT_ROUND' ? 'Avanzando...' : 'Siguiente ronda'}
-            </Text>
-          </TouchableOpacity>
+          <Text style={styles.noticeText}>
+            Esperando siguiente ronda...
+          </Text>
         </View>
       );
     }
@@ -1348,7 +1710,7 @@ export default function GameScreen() {
             {didCurrentUserWin
               ? 'Enhorabuena, has terminado en primera posicion.'
               : finalWinnerId
-                ? `Ha ganado ${finalWinnerId}.`
+                ? `Ha ganado ${getPlayerName(finalWinnerId)}.`
                 : 'Ya hay un ganador. Puedes revisar la puntuacion final abajo.'}
           </Text>
         </View>
@@ -1358,7 +1720,7 @@ export default function GameScreen() {
     return (
       <View style={styles.panel}>
         <Text style={styles.sectionLabel}>Esperando fase</Text>
-        <Text style={styles.noticeText}>El backend aún no ha enviado una fase jugable.</Text>
+        <Text style={styles.noticeText}>El backend aun no ha enviado una fase jugable.</Text>
       </View>
     );
   };
@@ -1401,10 +1763,25 @@ export default function GameScreen() {
 
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           <View style={[styles.clueHeroPanel, !visibleRoundPrompt && styles.clueHeroPanelIdle]}>
-            <Text style={styles.clueHeroLabel}>{isStellaMode ? 'Palabra' : 'Pista'}</Text>
-            <Text style={visibleRoundPrompt ? styles.clueHeroText : styles.clueHeroIdleText}>
-              {visibleRoundPrompt || (isStellaMode ? 'Esperando palabra' : 'Esperando pista')}
-            </Text>
+            <View style={styles.clueHeroHeader}>
+              <View>
+                <Text style={styles.clueHeroLabel}>{isStellaMode ? 'Palabra' : 'Pista'}</Text>
+                <Text style={visibleRoundPrompt ? styles.clueHeroText : styles.clueHeroIdleText}>
+                  {visibleRoundPrompt || (isStellaMode ? 'Esperando palabra' : 'Esperando pista')}
+                </Text>
+              </View>
+              <View style={styles.viewToggle}>
+                <TouchableOpacity
+                  style={[styles.viewToggleButton, styles.viewToggleButtonActive]}
+                  onPress={() => setBoardInspectorMode('board')}
+                >
+                  <Ionicons name="grid-outline" size={16} color="#10212e" />
+                  <Text style={[styles.viewToggleButtonText, styles.viewToggleButtonTextActive]}>
+                    Ver tablero
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
           </View>
 
           {modeChangeOffer ? (
@@ -1442,7 +1819,7 @@ export default function GameScreen() {
                     onPress={() => startDuelAgainst(player.id)}
                     disabled={pendingActionType === 'RESOLVE_DUEL'}
                   >
-                    <Text style={styles.targetButtonText}>{player.id}</Text>
+                    <Text style={styles.targetButtonText}>{player.name}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
@@ -1450,6 +1827,47 @@ export default function GameScreen() {
           ) : null}
 
           {renderPhasePanel()}
+
+          {currentPhase === 'VOTING' && !isStellaMode ? (
+            <View style={styles.panel}>
+              <View style={styles.rowBetween}>
+                <Text style={styles.sectionLabel}>{isStoryteller ? 'Cartas elegidas' : 'Cartas en mesa'}</Text>
+                <Text style={styles.mutedText}>
+                  {isStoryteller ? `${storytellerBoardCards.length} jugadas` : `${voteableBoardCards.length} opciones`}
+                </Text>
+              </View>
+              {isStoryteller ? (
+                <Text style={styles.noticeText}>Estas son las cartas que el resto ha jugado para tu pista.</Text>
+              ) : null}
+              <View style={styles.boardCardGrid}>
+                {(isStoryteller ? storytellerBoardCards : voteableBoardCards).map((card, index) => {
+                  const selected = selectedVoteCardId === card.id;
+                  const imageUrl =
+                    typeof card.url_image === 'string' && card.url_image.trim().length > 0
+                      ? card.url_image
+                      : getCardImageUrl(card.id);
+
+                  return (
+                    <TouchableOpacity
+                      key={`board-${card.id}-${index}`}
+                      style={[styles.boardCard, selected && styles.boardCardSelected, isStoryteller && styles.boardCardReadonly]}
+                      disabled={isStoryteller}
+                      onPress={() => setSelectedVoteCardId(card.id)}
+                    >
+                      {imageUrl ? (
+                        <Image source={{ uri: imageUrl }} style={styles.boardCardImage} />
+                      ) : (
+                        <View style={styles.placeholderCardFace}>
+                          <Text style={styles.boardCardLabel}>Carta</Text>
+                          <Text style={styles.boardCardId}>{card.id}</Text>
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+          ) : null}
 
           {currentPhase === 'FINISHED' ? (
             <>
@@ -1460,7 +1878,7 @@ export default function GameScreen() {
                     <View key={entry.playerId} style={[styles.resultRow, entry.playerId === currentUserId && styles.resultRowSelf]}>
                       <View>
                         <Text style={styles.resultName}>
-                          {entry.place}. {entry.playerId}
+                          {entry.place}. {getPlayerName(entry.playerId)}
                           {entry.playerId === currentUserId ? ' (tu)' : ''}
                         </Text>
                         <Text style={styles.resultMeta}>{entry.points} puntos</Text>
@@ -1476,7 +1894,7 @@ export default function GameScreen() {
                       <View key={player.id} style={[styles.resultRow, player.id === currentUserId && styles.resultRowSelf]}>
                         <View>
                           <Text style={styles.resultName}>
-                            {index + 1}. {player.id}
+                            {index + 1}. {player.name}
                             {player.id === currentUserId ? ' (tu)' : ''}
                           </Text>
                           <Text style={styles.resultMeta}>{player.score} puntos</Text>
@@ -1504,71 +1922,67 @@ export default function GameScreen() {
           ) : null}
 
           {!isStellaMode ? (
-          <View style={styles.panel}>
-            <View style={styles.rowBetween}>
-              <Text style={styles.sectionLabel}>Tu mano</Text>
-              <Text style={styles.mutedText}>{handCards.length} cartas</Text>
-            </View>
-            {handCards.length === 0 ? (
-              <Text style={styles.emptyText}>Todavía no ha llegado tu mano privada.</Text>
-            ) : (
-              <View style={styles.cardGrid}>
-                {handCards.map((card, index) => {
-                  const selected = selectedHandCardId === card.id;
-                  return (
-                    <TouchableOpacity key={`${card.rawId}-${index}`} style={[styles.handCard, selected && styles.handCardSelected]} onPress={() => setSelectedHandCardId(card.id)}>
-                      {card.url_image ? (
-                        <Image source={{ uri: card.url_image }} style={styles.handCardImage} />
-                      ) : (
-                        <View style={styles.placeholderCardFace}>
-                          <Text style={styles.placeholderCardId}>Carta {card.id}</Text>
-                        </View>
-                      )}
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            )}
-          </View>
-          ) : null}
-
-          {currentPhase === 'VOTING' && !isStellaMode ? (
             <View style={styles.panel}>
               <View style={styles.rowBetween}>
-                <Text style={styles.sectionLabel}>{isStoryteller ? 'Cartas elegidas' : 'Cartas en mesa'}</Text>
-                <Text style={styles.mutedText}>
-                  {isStoryteller ? `${storytellerBoardCards.length} jugadas` : `${voteableBoardCards.length} opciones`}
-                </Text>
+                <Text style={styles.sectionLabel}>Tu mano</Text>
+                <Text style={styles.mutedText}>{handCards.length} cartas</Text>
               </View>
-              {isStoryteller ? (
-                <Text style={styles.noticeText}>Estas son las cartas que el resto ha jugado para tu pista.</Text>
+              {currentHandModifier ? (
+                <View
+                  style={[
+                    styles.handModifierBanner,
+                    currentHandModifier.value && currentHandModifier.value > 0
+                      ? styles.handModifierBannerPositive
+                      : styles.handModifierBannerNegative,
+                  ]}
+                >
+                  <Image
+                    source={
+                      currentHandModifier.value && currentHandModifier.value > 0
+                        ? HAND_LIMIT_PLUS_IMAGE
+                        : HAND_LIMIT_MINUS_IMAGE
+                    }
+                    style={styles.handModifierBannerImage}
+                    resizeMode="contain"
+                  />
+                  <View style={styles.handModifierBannerTextGroup}>
+                    <Text style={styles.handModifierBannerTitle}>
+                      {currentHandModifier.value && currentHandModifier.value > 0
+                        ? `Bonus de mano: +${currentHandModifier.value}`
+                        : `Limite de mano: ${currentHandModifier.value ?? 0}`}
+                    </Text>
+                    <Text style={styles.handModifierBannerText}>
+                      {currentHandModifier.turnsLeft && currentHandModifier.turnsLeft > 0
+                        ? `${currentHandModifier.turnsLeft} ronda${currentHandModifier.turnsLeft === 1 ? '' : 's'} restante${currentHandModifier.turnsLeft === 1 ? '' : 's'}`
+                        : 'Modificador temporal activo'}
+                    </Text>
+                  </View>
+                </View>
               ) : null}
-              <View style={styles.boardCardGrid}>
-                {(isStoryteller ? storytellerBoardCards : voteableBoardCards).map((card, index) => {
-                  const selected = selectedVoteCardId === card.id;
-                  const imageUrl =
-                    typeof card.url_image === 'string' && card.url_image.trim().length > 0
-                      ? card.url_image
-                      : getCardImageUrl(card.id);
-                  return (
-                    <TouchableOpacity
-                      key={`board-${card.id}-${index}`}
-                      style={[styles.boardCard, selected && styles.boardCardSelected, isStoryteller && styles.boardCardReadonly]}
-                      disabled={isStoryteller}
-                      onPress={() => setSelectedVoteCardId(card.id)}
-                    >
-                      {imageUrl ? (
-                        <Image source={{ uri: imageUrl }} style={styles.boardCardImage} />
-                      ) : (
-                        <View style={styles.placeholderCardFace}>
-                          <Text style={styles.boardCardLabel}>Carta</Text>
-                          <Text style={styles.boardCardId}>{card.id}</Text>
-                        </View>
-                      )}
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
+              {handCards.length === 0 ? (
+                <Text style={styles.emptyText}>Todavía no ha llegado tu mano privada.</Text>
+              ) : (
+                <View style={styles.cardGrid}>
+                  {handCards.map((card, index) => {
+                    const selected = selectedHandCardId === card.id;
+                    return (
+                      <TouchableOpacity
+                        key={`${card.rawId}-${index}`}
+                        style={[styles.handCard, selected && styles.handCardSelected]}
+                        onPress={() => setSelectedHandCardId(card.id)}
+                      >
+                        {card.url_image ? (
+                          <Image source={{ uri: card.url_image }} style={styles.handCardImage} />
+                        ) : (
+                          <View style={styles.placeholderCardFace}>
+                            <Text style={styles.placeholderCardId}>Carta {card.id}</Text>
+                          </View>
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
             </View>
           ) : null}
 
@@ -1585,7 +1999,7 @@ export default function GameScreen() {
                   <View style={styles.playerIdentity}>
                     <View style={[styles.playerDot, { backgroundColor: player.connected ? '#2ecc71' : '#7f8c8d' }]} />
                     <View>
-                      <Text style={styles.playerName}>{player.id}</Text>
+                      <Text style={styles.playerName}>{player.name}</Text>
                       <Text style={styles.playerMeta}>Puntos: {player.score} · Casilla: {player.score}</Text>
                     </View>
                   </View>
@@ -1595,62 +2009,16 @@ export default function GameScreen() {
             )}
           </View>
 
-          <View style={styles.panel}>
-            <Text style={styles.sectionLabel}>Tablero</Text>
-            <View style={styles.boardCanvas}>
-              {boardImageUrl ? (
-                <Image
-                  source={{ uri: boardImageUrl }}
-                  style={styles.boardPreviewOverlay}
-                  resizeMode="cover"
-                  onError={() => setBoardImageFailed(true)}
-                  onLoad={() => setBoardImageFailed(false)}
-                />
-              ) : null}
-              <View style={styles.boardGrid}>
-              {boardTiles.map((tile: any, index) => {
-                const tileIndex = tile.index ?? tile.numero ?? index + 1;
-                const tileType = tile.type ?? tile.tipo ?? 'normal';
-                const occupants = players.filter((player) => player.score === tileIndex);
-                const glyph = tileType !== 'normal' ? ['✦', '✧', '☽', '✶'][tileIndex % 4] : ['·', '✧', '✦'][tileIndex % 3];
-
-                return (
-                  <View
-                    key={`${tileIndex}-${index}`}
-                    style={[
-                      styles.boardTile,
-                      tileType !== 'normal' && styles.boardTileSpecial,
-                      boardHasOverlay && styles.boardTileOverlay,
-                    ]}
-                  >
-                    <Text style={styles.boardTileGlyph}>{glyph}</Text>
-                    <Text style={styles.boardTileText}>{tileIndex}</Text>
-                    {occupants.length > 0 ? (
-                      <View style={styles.tileOccupants}>
-                        {occupants.map((player) => (
-                          <View key={player.id} style={styles.tileBadge}>
-                            <Text style={styles.tileBadgeText}>{player.id.charAt(0).toUpperCase()}</Text>
-                          </View>
-                        ))}
-                      </View>
-                    ) : null}
-                  </View>
-                );
-              })}
-              </View>
-            </View>
-          </View>
-
           {false && pendingScore !== null && activeConflictData && isParticipant ? (
             <View style={styles.panel}>
               <Text style={styles.sectionLabel}>Resolver duelo</Text>
-              <Text style={styles.noticeText}>Tu minijuego terminó con {pendingScore} puntos. Elige el ganador final.</Text>
+              <Text style={styles.noticeText}>Tu minijuego terminÃƒÂ³ con {pendingScore} puntos. Elige el ganador final.</Text>
               <View style={styles.targetList}>
                 <TouchableOpacity style={styles.targetButton} onPress={() => resolveConflictWinner(activeConflictData?.player1 ?? '')}>
-                  <Text style={styles.targetButtonText}>Gana {activeConflictData?.player1 ?? ''}</Text>
+                  <Text style={styles.targetButtonText}>Gana {getPlayerName(activeConflictData?.player1 ?? '')}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.targetButton} onPress={() => resolveConflictWinner(activeConflictData?.player2 ?? '')}>
-                  <Text style={styles.targetButtonText}>Gana {activeConflictData?.player2 ?? ''}</Text>
+                  <Text style={styles.targetButtonText}>Gana {getPlayerName(activeConflictData?.player2 ?? '')}</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -1659,24 +2027,51 @@ export default function GameScreen() {
           {activeConflictData && !isParticipant ? (
             <View style={styles.panel}>
               <Text style={styles.sectionLabel}>Duelo en curso</Text>
-              <Text style={styles.noticeText}>{activeConflictData.player1} y {activeConflictData.player2} están resolviendo un conflicto.</Text>
+              <Text style={styles.noticeText}>{getPlayerName(activeConflictData.player1)} y {getPlayerName(activeConflictData.player2)} están resolviendo un conflicto.</Text>
             </View>
           ) : null}
         </ScrollView>
 
+        <Modal visible={boardInspectorMode === 'board'} transparent animationType="fade">
+          <View style={styles.boardModalBackdrop}>
+            <View style={styles.boardModalCard}>
+              <View style={styles.boardModalHeader}>
+                <View>
+                  <Text style={styles.boardModalTitle}>Tablero</Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.boardModalCloseButton}
+                  onPress={() => setBoardInspectorMode('clue')}
+                >
+                  <Ionicons name="close" size={20} color="#10212e" />
+                </TouchableOpacity>
+              </View>
+              <View style={styles.boardModalCanvas}>{renderBoardInspector()}</View>
+            </View>
+          </View>
+        </Modal>
+
         <DuelMinigameModal
-          conflict={showConflictModal ? activeConflict : null}
+          conflict={showConflictModal ? playableConflictData : null}
           currentUserId={currentUserId}
           onClose={() => setShowConflictModal(false)}
           onResolved={(score) => {
+            const resolvedConflictKey = activeConflictKey;
+            if (resolvedConflictKey && completedConflictKeyRef.current === resolvedConflictKey) {
+              setShowConflictModal(false);
+              return;
+            }
+
             setPendingScore(score);
+            if (resolvedConflictKey) {
+              completedConflictKeyRef.current = resolvedConflictKey;
+              setCompletedConflictKey(resolvedConflictKey);
+              void AsyncStorage.setItem(COMPLETED_CONFLICT_STORAGE_KEY, resolvedConflictKey);
+              void AsyncStorage.setItem(COMPLETED_CONFLICT_RESULT_STORAGE_KEY, String(score));
+            }
+
             if (isParticipant) {
               submitMinigameScore(score, resolvedLobbyCode);
-            }
-            if (activeConflictKey) {
-              setCompletedConflictKey(activeConflictKey);
-              void AsyncStorage.setItem(COMPLETED_CONFLICT_STORAGE_KEY, activeConflictKey);
-              void AsyncStorage.setItem(COMPLETED_CONFLICT_RESULT_STORAGE_KEY, String(score));
             }
             setShowConflictModal(false);
           }}
@@ -1693,17 +2088,17 @@ export default function GameScreen() {
                 transform: [{ translateX: starTranslateX }, { translateY: starTranslateY }, { scale: starScale }],
               },
             ]}
-          >
-            <TouchableOpacity
-              style={styles.starButton}
-              disabled={!currentUserId}
-              activeOpacity={0.8}
-              onPress={() => claimStar(currentUserId, resolvedLobbyCode)}
             >
-              <Text style={styles.starGlyph}>✦</Text>
-            </TouchableOpacity>
-          </Animated.View>
-        ) : null}
+              <TouchableOpacity
+                style={styles.starButton}
+                disabled={!currentUserId}
+                activeOpacity={0.8}
+                onPress={() => claimStar(currentUserId, resolvedLobbyCode)}
+              >
+                <Ionicons name="star" size={28} color="#FCEEB5" />
+              </TouchableOpacity>
+            </Animated.View>
+          ) : null}
         {chatOpen ? (
           <TouchableOpacity
             style={styles.chatBackdrop}
@@ -1743,7 +2138,7 @@ export default function GameScreen() {
             ) : (
               lobbyChatMessages.map((message) => (
                 <View key={message.id} style={styles.gameChatMessage}>
-                  <Text style={styles.gameChatAuthor}>{message.username}</Text>
+                  <Text style={styles.gameChatAuthor}>{getPlayerName(message.username)}</Text>
                   <Text style={styles.gameChatText}>{message.text}</Text>
                 </View>
               ))
@@ -1823,10 +2218,14 @@ const styles = StyleSheet.create({
     paddingVertical: 18,
     borderWidth: 1,
     borderColor: '#FCEEB5',
-    alignItems: 'center',
+    gap: 14,
   },
   clueHeroPanelIdle: {
     borderColor: 'rgba(252,238,181,0.28)',
+  },
+  clueHeroHeader: {
+    width: '100%',
+    gap: 14,
   },
   clueHeroLabel: {
     color: '#8caea6',
@@ -1846,6 +2245,33 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     textAlign: 'center',
+  },
+  viewToggle: {
+    alignItems: 'center',
+    marginTop: 6,
+  },
+  viewToggleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderRadius: 999,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: '#FCEEB5',
+  },
+  viewToggleButtonActive: {
+    backgroundColor: '#FCEEB5',
+    borderColor: '#FCEEB5',
+  },
+  viewToggleButtonText: {
+    color: '#FCEEB5',
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  viewToggleButtonTextActive: {
+    color: '#10212e',
   },
   offerPanel: {
     backgroundColor: 'rgba(8, 19, 29, 0.98)',
@@ -1955,6 +2381,60 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
   },
+  voteSummaryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  voteSummaryCard: {
+    width: 96,
+    height: 136,
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(252,238,181,0.2)',
+    position: 'relative',
+  },
+  voteSummaryImage: {
+    width: '100%',
+    height: '100%',
+  },
+  voteSummaryBadge: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    minWidth: 36,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: '#FCEEB5',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  voteSummaryBadgeText: {
+    color: '#10212e',
+    fontWeight: 'bold',
+  },
+  voteSummaryOwner: {
+    position: 'absolute',
+    left: 6,
+    right: 6,
+    bottom: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(8, 19, 29, 0.82)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  voteSummaryOwnerText: {
+    color: '#FCEEB5',
+    fontSize: 10,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
   stellaWord: {
     color: '#FCEEB5',
     fontSize: 24,
@@ -2001,6 +2481,41 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     textAlign: 'center',
   },
+  handModifierBanner: {
+    marginTop: 10,
+    marginBottom: 4,
+    borderRadius: 16,
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderWidth: 1,
+  },
+  handModifierBannerPositive: {
+    backgroundColor: 'rgba(56, 142, 60, 0.18)',
+    borderColor: 'rgba(144, 238, 144, 0.45)',
+  },
+  handModifierBannerNegative: {
+    backgroundColor: 'rgba(183, 28, 28, 0.18)',
+    borderColor: 'rgba(255, 138, 128, 0.45)',
+  },
+  handModifierBannerImage: {
+    width: 60,
+    height: 60,
+  },
+  handModifierBannerTextGroup: {
+    flex: 1,
+    gap: 3,
+  },
+  handModifierBannerTitle: {
+    color: '#FCEEB5',
+    fontWeight: 'bold',
+    fontSize: 15,
+  },
+  handModifierBannerText: {
+    color: '#d7dce2',
+    lineHeight: 18,
+  },
   scoreList: { gap: 10 },
   playerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 14, padding: 12 },
   playerIdentity: { flexDirection: 'row', alignItems: 'center', gap: 10 },
@@ -2025,58 +2540,148 @@ const styles = StyleSheet.create({
   resultName: { color: '#FCEEB5', fontWeight: 'bold', fontSize: 16 },
   resultMeta: { color: '#d7dce2', marginTop: 4, fontSize: 12 },
   resultCoins: { color: '#FCEEB5', fontWeight: 'bold', fontSize: 16 },
+  boardModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 8,
+  },
+  boardModalCard: {
+    width: '100%',
+    maxWidth: 760,
+    borderRadius: 16,
+    backgroundColor: 'rgba(8, 19, 29, 0.98)',
+    borderWidth: 1,
+    borderColor: 'rgba(252,238,181,0.28)',
+    padding: 10,
+    gap: 14,
+  },
+  boardModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  boardModalTitle: {
+    color: '#FCEEB5',
+    fontSize: 22,
+    fontWeight: 'bold',
+  },
+  boardModalSubtitle: {
+    color: '#d7dce2',
+    marginTop: 4,
+  },
+  boardModalCloseButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#FCEEB5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  boardModalCanvas: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   boardCanvas: {
     width: '100%',
+    aspectRatio: 0.58,
     position: 'relative',
+    backgroundColor: 'rgba(18, 30, 48, 0.92)',
     borderRadius: 16,
     overflow: 'hidden',
-    padding: 14,
-    backgroundColor: 'rgba(18, 30, 48, 0.92)',
   },
   boardPreviewOverlay: {
     ...StyleSheet.absoluteFillObject,
-    borderRadius: 16,
+    width: '100%',
+    height: '100%',
     zIndex: 0,
   },
-  boardGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'center', position: 'relative', zIndex: 2 },
+  boardGrid: { flex: 1, position: 'relative', zIndex: 2 },
   boardTile: {
-    width: 48,
-    height: 52,
-    borderRadius: 18,
-    backgroundColor: 'rgba(18, 30, 48, 0.92)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    position: 'relative',
-    borderWidth: 1,
-    borderColor: 'rgba(252,238,181,0.18)',
-  },
-  boardTileSpecial: {
-    backgroundColor: 'rgba(88, 53, 109, 0.94)',
-    borderColor: '#FCEEB5',
-  },
-  boardTileOverlay: {
-    backgroundColor: 'rgba(18, 30, 48, 0.58)',
-    borderColor: 'rgba(252,238,181,0.42)',
-  },
-  boardTileGlyph: {
-    color: '#FCEEB5',
-    fontSize: 12,
-    marginBottom: 2,
-    opacity: 0.85,
-  },
-  boardTileText: { color: '#dfe7ef', fontWeight: 'bold', fontSize: 11 },
-  tileOccupants: { position: 'absolute', bottom: -6, flexDirection: 'row', gap: 2 },
-  tileBadge: {
-    width: 16,
-    height: 16,
+    width: 32,
+    height: 34,
     borderRadius: 8,
+    position: 'absolute',
+    borderWidth: 2,
+    shadowColor: '#000',
+    shadowOpacity: 0.45,
+    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
+  },
+  boardTileInnerLayer: {
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.35)',
+    borderRadius: 6,
+    margin: 1,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.4)',
+  },
+  boardTileContent: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 3,
+  },
+  boardTileShapeDiamond: {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+  },
+  boardTileInnerLayerDiamond: {
+    borderRadius: 6,
+  },
+  boardTileContentCounterRotate: {
+    transform: [{ rotate: '-45deg' }],
+  },
+  boardTileWide: { width: 36, height: 36 },
+  boardTileFinish: {
+    width: 44, height: 48,
+    borderRadius: 14,
+  },
+  boardTileOverlay: { backgroundColor: 'rgba(255, 255, 255, 0.1)' },
+  boardTileIndex: {
+    fontWeight: '900',
+    fontSize: 10,
+    marginBottom: 2,
+    textShadowColor: 'rgba(255,255,255,0.6)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 1,
+  },
+  boardTileBadge: {
+    minWidth: 18, height: 16,
+    paddingHorizontal: 3,
+    borderRadius: 999,
+    justifyContent: 'center', alignItems: 'center',
+    shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 2, elevation: 3,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.6)',
+  },
+  boardTileBadgeText: {
+    fontWeight: '900',
+    fontSize: 8,
+  },
+  tileOccupants: { position: 'absolute', bottom: -8, flexDirection: 'row', gap: 2 },
+  tileBadge: {
+    height: 18,
+    minWidth: 18,
+    paddingHorizontal: 4,
+    borderRadius: 9,
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.7)',
-    backgroundColor: '#2c3e50',
+    borderWidth: 1.5,
+    borderColor: '#fff',
+    backgroundColor: '#1a1f30',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.3,
+    shadowRadius: 2,
+    shadowOffset: { width: 0, height: 1 },
   },
-  tileBadgeText: { color: '#FCEEB5', fontSize: 8, fontWeight: 'bold' },
+  tileBadgeText: { color: '#ffffff', fontSize: 7, fontWeight: '900' },
   starFlight: {
     position: 'absolute',
     zIndex: 20,

@@ -7,19 +7,24 @@ import {
   SafeAreaView,
   ActivityIndicator,
   ScrollView,
+  FlatList,
   TextInput,
   Alert,
-  Image,
   Modal
 } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import { useFonts } from 'expo-font';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as SplashScreen from 'expo-splash-screen';
 import Svg, { Text as SvgText } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URL } from '@/constants/api';
+import { normalizeRemoteAssetUrl } from '@/constants/asset-url';
+import {
+  readDismissedActiveLobbyCodes,
+} from '@/constants/dismissed-active-lobbies';
 import { useGameSession } from '@/contexts/game-session-context';
 import { SocialPanel } from '@/components/social-panel';
 
@@ -37,12 +42,64 @@ type OwnedCardOption = {
   quantity: number;
   url_image: string | null;
   collectionName: string;
+  isOwned: boolean;
 };
 
-const PRIMARY_DECK_NAME = 'Mazo principal';
+type FetchDecksOptions = {
+  includeCatalog?: boolean;
+  silent?: boolean;
+};
+
+type DeckCardTileProps = {
+  card: OwnedCardOption;
+  isSelected: boolean;
+  onToggle: (cardId: string) => void;
+};
+
+const DeckCardTile = memo(function DeckCardTile({ card, isSelected, onToggle }: DeckCardTileProps) {
+  const isLockedCard = !card.isOwned;
+
+  return (
+    <TouchableOpacity
+      style={[
+        styles.deckCardOption,
+        isSelected && styles.deckCardOptionSelected,
+        isLockedCard && styles.deckCardOptionLocked,
+      ]}
+      onPress={() => onToggle(card.cardId)}
+      activeOpacity={isLockedCard ? 1 : 0.85}
+      disabled={isLockedCard}
+    >
+      {card.url_image ? (
+        <ExpoImage
+          source={{ uri: card.url_image }}
+          style={styles.deckCardImage}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+        />
+      ) : (
+        <View style={styles.deckCardPlaceholder}>
+          <Text style={styles.deckCardPlaceholderText}>{card.cardId.replace('c_', '')}</Text>
+        </View>
+      )}
+      {isLockedCard ? (
+        <View style={styles.deckCardLockOverlay}>
+          <Ionicons name="lock-closed" size={22} color="#FCEEB5" />
+        </View>
+      ) : null}
+      {isSelected ? (
+        <View style={styles.deckCardCheck}>
+          <Ionicons name="checkmark" size={14} color="#10212e" />
+        </View>
+      ) : null}
+    </TouchableOpacity>
+  );
+});
+
+const DEFAULT_DECK_NAME = 'Nuevo mazo';
 const DECK_MIN_CARDS = 16;
-const DISMISSED_ACTIVE_LOBBY_STORAGE_KEY = 'dismissedActiveLobbyCode';
 const EASTER_EGG_TAPS = 20;
+const LOBBY_PLAYER_OPTIONS = ['3', '4', '5', '6'];
 const EASTER_EGG_MESSAGE =
   'Enhorabuena, has descubierto nuestro único easter egg. Dale las gracias a Sergio Guerra y Mohamed Rayen, desarrolladores del frontend movil de este juego.';
 
@@ -56,6 +113,12 @@ const normalizeDeckId = (value: unknown) => {
   const raw = String(value ?? '').trim();
   if (!raw) return '';
   return raw.startsWith('d_') ? raw : `d_${raw.replace(/^d_/i, '')}`;
+};
+
+const normalizeCollectionId = (value: unknown) => {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+  return raw.startsWith('col_') ? raw : `col_${raw.replace(/^col_/i, '')}`;
 };
 
 const formatCollectionSegment = (value: string) => {
@@ -107,7 +170,11 @@ const dedupeCardsById = (cards: OwnedCardOption[]) => {
 
   cards.forEach((card) => {
     if (!card.cardId || uniqueCards.has(card.cardId)) return;
-    uniqueCards.set(card.cardId, { ...card, quantity: 1 });
+    uniqueCards.set(card.cardId, {
+      ...card,
+      quantity: Math.max(0, Number(card.quantity ?? 0)),
+      isOwned: Boolean(card.isOwned),
+    });
   });
 
   return Array.from(uniqueCards.values());
@@ -122,14 +189,46 @@ const normalizeLobbyMode = (value: unknown) => {
 
 const getLobbyCode = (lobby: any) => String(lobby?.lobbyCode ?? lobby?.code ?? '');
 
+const getPlayerId = (player: any) => {
+  if (typeof player === 'string' || typeof player === 'number') return String(player);
+  return String(
+    player?.id ??
+      player?.id_user ??
+      player?.userId ??
+      player?.user_id ??
+      player?.playerId ??
+      player?.user?.id ??
+      player?.user?.id_user ??
+      ''
+  );
+};
+
+const getLobbyPlayerIds = (lobby: any) => {
+  if (!Array.isArray(lobby?.players)) return [];
+  return lobby.players.map(getPlayerId).filter(Boolean);
+};
+
 const isLobbyVisible = (lobby: any) => {
-  const hostId = String(lobby?.hostId ?? lobby?.host_id ?? '');
-  const players = Array.isArray(lobby?.players) ? lobby.players.map(String) : [];
+  const hostId = getPlayerId(lobby?.hostId ?? lobby?.host_id ?? lobby?.host);
+  const players = getLobbyPlayerIds(lobby);
+  if (players.length === 0) return true;
   return !hostId || players.includes(hostId);
 };
 
+const isUserInLobby = (lobby: any, userId: string) => {
+  if (!userId) return true;
+  const players = getLobbyPlayerIds(lobby);
+  return players.includes(userId);
+};
+
 export default function MenuScreen() {
-  const { activeGameId, closeActiveGame, dismissActiveGame, reconnectToActiveGame } = useGameSession();
+  const {
+    activeGameId,
+    closeActiveGame,
+    dismissActiveGame,
+    reconnectToActiveGame,
+    refreshSession,
+  } = useGameSession();
   const [loaded, error] = useFonts({
     'FuenteTitulo': require('../assets/fonts/fuente-dilana.ttf'),
   });
@@ -146,12 +245,15 @@ export default function MenuScreen() {
   const [lobbies, setLobbies] = useState<any[]>([]);
   const [isLoadingLobbies, setIsLoadingLobbies] = useState(true);
   const [isCreatingLobby, setIsCreatingLobby] = useState(false);
+  const [isLobbySearchVisible, setIsLobbySearchVisible] = useState(false);
+  const [lobbySearchQuery, setLobbySearchQuery] = useState('');
   const [socialVisible, setSocialVisible] = useState(false);
   const [decks, setDecks] = useState<UserDeck[]>([]);
   const [ownedCards, setOwnedCards] = useState<OwnedCardOption[]>([]);
   const [isLoadingDecks, setIsLoadingDecks] = useState(false);
   const [deckEditorVisible, setDeckEditorVisible] = useState(false);
   const [editingDeck, setEditingDeck] = useState<UserDeck | null>(null);
+  const [editingDeckName, setEditingDeckName] = useState('');
   const [selectedDeckCardIds, setSelectedDeckCardIds] = useState<string[]>([]);
   const [selectedCollectionName, setSelectedCollectionName] = useState('Todas');
   const [isSavingDeck, setIsSavingDeck] = useState(false);
@@ -159,6 +261,7 @@ export default function MenuScreen() {
   const [easterEggVisible, setEasterEggVisible] = useState(false);
   const dismissActiveGameRef = useRef(dismissActiveGame);
   const easterEggTapCountRef = useRef(0);
+  const deckCatalogLoadedRef = useRef(false);
 
   useEffect(() => {
     dismissActiveGameRef.current = dismissActiveGame;
@@ -189,14 +292,23 @@ export default function MenuScreen() {
 
       const timestamp = new Date().getTime();
 
-      const responseProfile = await fetch(`${API_URL}/users/profile?t=${timestamp}`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          'Cache-Control': 'no-cache'
-        }
-      });
+      const [responseProfile, responseBalance] = await Promise.all([
+        fetch(`${API_URL}/users/profile?t=${timestamp}`, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-cache'
+          }
+        }),
+        fetch(`${API_URL}/users/balance?t=${timestamp}`, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Cache-Control': 'no-cache'
+          }
+        }),
+      ]);
 
       if (responseProfile.ok) {
         const dataProfile = await responseProfile.json();
@@ -216,14 +328,6 @@ export default function MenuScreen() {
       } else {
         setUsername('Jugador');
       }
-
-      const responseBalance = await fetch(`${API_URL}/users/balance?t=${timestamp}`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Cache-Control': 'no-cache'
-        }
-      });
 
       if (responseBalance.ok) {
         const dataBalance = await responseBalance.json();
@@ -281,10 +385,11 @@ export default function MenuScreen() {
               ? data.data
               : [];
 
-      const dismissedLobbyCode = await AsyncStorage.getItem(DISMISSED_ACTIVE_LOBBY_STORAGE_KEY);
+      const dismissedLobbyCodes = await readDismissedActiveLobbyCodes();
       setLobbies(
-        rawLobbies.filter((lobby) =>
-          isLobbyVisible(lobby) && (!dismissedLobbyCode || getLobbyCode(lobby) !== dismissedLobbyCode)
+        rawLobbies.filter((lobby: any) =>
+          isLobbyVisible(lobby) &&
+          !dismissedLobbyCodes.includes(getLobbyCode(lobby).toUpperCase())
         )
       );
     } catch (error) {
@@ -303,33 +408,55 @@ export default function MenuScreen() {
   };
 
   const extractCollectionCards = (payload: any) => {
-    if (Array.isArray(payload?.cards)) return payload.cards;
+    if (Array.isArray(payload?.cards)) {
+      if (payload.cards.every((item: any) => Array.isArray(item?.cards))) {
+        return payload.cards.flatMap((item: any) => item.cards);
+      }
+      return payload.cards;
+    }
     if (Array.isArray(payload?.cards?.cards)) return payload.cards.cards;
     if (Array.isArray(payload?.cards?.collections?.[0]?.cards)) return payload.cards.collections[0].cards;
     if (Array.isArray(payload?.collection?.cards)) return payload.collection.cards;
+    if (Array.isArray(payload?.collections?.[0]?.cards)) return payload.collections[0].cards;
+    if (Array.isArray(payload?.data?.cards)) return payload.data.cards;
     return [];
   };
 
-  const fetchCollectionMap = async (token: string) => {
+  const fetchCollectionData = useCallback(async (token: string) => {
     try {
       const response = await fetch(`${API_URL}/collections`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await response.json();
-      if (!response.ok) return new Map<string, string>();
+      if (!response.ok) {
+        return {
+          collectionMap: new Map<string, string>(),
+          catalogCards: [] as OwnedCardOption[],
+        };
+      }
 
       const collections = extractCollections(data);
-      const collectionEntries = await Promise.all(
+      const collectionCardsByCollection = await Promise.all(
         collections.map(async (collection: any) => {
-          const collectionId = collection.id ?? collection.id_collection;
-          if (!collectionId) return [];
+          const collectionId = normalizeCollectionId(collection.id ?? collection.id_collection);
+          if (!collectionId) {
+            return {
+              collectionName: String(collection.name ?? 'Sin coleccion'),
+              cards: [] as any[],
+            };
+          }
 
           try {
             const cardsResponse = await fetch(`${API_URL}/collections/${collectionId}/cards`, {
               headers: { Authorization: `Bearer ${token}` },
             });
             const cardsData = await cardsResponse.json();
-            if (!cardsResponse.ok) return [];
+            if (!cardsResponse.ok) {
+              return {
+                collectionName: String(collection.name ?? 'Sin coleccion'),
+                cards: [] as any[],
+              };
+            }
 
             const collectionName =
               cardsData?.collection?.name ??
@@ -337,21 +464,50 @@ export default function MenuScreen() {
               collection.name ??
               'Sin coleccion';
 
-            return extractCollectionCards(cardsData).map((card: any) => [
-              normalizeCardId(card.id ?? card.cardId ?? card.id_card),
-              String(collectionName),
-            ]);
+            return {
+              collectionName: String(collectionName),
+              cards: extractCollectionCards(cardsData),
+            };
           } catch {
-            return [];
+            return {
+              collectionName: String(collection.name ?? 'Sin coleccion'),
+              cards: [] as any[],
+            };
           }
         })
       );
 
-      return new Map<string, string>(collectionEntries.flat() as [string, string][]);
+      const collectionMap = new Map<string, string>();
+      const catalogCards: OwnedCardOption[] = [];
+
+      collectionCardsByCollection.forEach(({ collectionName, cards }) => {
+        cards.forEach((card: any) => {
+          const cardId = normalizeCardId(card.id ?? card.cardId ?? card.id_card);
+          if (!cardId) return;
+
+          collectionMap.set(cardId, String(collectionName));
+          catalogCards.push({
+            cardId,
+            name: String(card.name ?? card.title ?? 'Carta sin nombre'),
+            quantity: 0,
+            url_image: normalizeRemoteAssetUrl(card.url_image),
+            collectionName: resolveCardCollectionName(card, String(collectionName)),
+            isOwned: false,
+          });
+        });
+      });
+
+      return {
+        collectionMap,
+        catalogCards: dedupeCardsById(catalogCards),
+      };
     } catch {
-      return new Map<string, string>();
+      return {
+        collectionMap: new Map<string, string>(),
+        catalogCards: [] as OwnedCardOption[],
+      };
     }
-  };
+  }, []);
 
   const createLobby = async () => {
     try {
@@ -364,23 +520,31 @@ export default function MenuScreen() {
       }
 
       if (activeGameId) {
-        Alert.alert(
-          'Partida activa',
-          'Hay una sesion anterior enganchada. Puedes volver a ella o descartarla para crear una sala nueva.',
-          [
-            { text: 'Cancelar', style: 'cancel' },
-            {
-              text: 'Volver',
-              onPress: () => void reconnectToActiveGame(),
-            },
-            {
-              text: 'Descartar',
-              style: 'destructive',
-              onPress: () => void dismissActiveGame(activeGameId),
-            },
-          ],
-        );
-        return;
+        const activeResponse = await fetch(`${API_URL}/lobbies/${activeGameId}?t=${Date.now()}`, {
+          headers: { Authorization: `Bearer ${token}`, 'Cache-Control': 'no-cache' },
+        });
+
+        if (activeResponse.ok) {
+          Alert.alert(
+            'Partida activa',
+            'Hay una sesion anterior enganchada. Puedes volver a ella o descartarla para crear una sala nueva.',
+            [
+              { text: 'Cancelar', style: 'cancel' },
+              {
+                text: 'Volver',
+                onPress: () => void reconnectToActiveGame(),
+              },
+              {
+                text: 'Descartar',
+                style: 'destructive',
+                onPress: () => void dismissActiveGame(activeGameId),
+              },
+            ],
+          );
+          return;
+        }
+
+        await dismissActiveGame(activeGameId);
       }
 
       setIsCreatingLobby(true);
@@ -413,8 +577,6 @@ export default function MenuScreen() {
       setLobbyPlayers('4');
       setLobbyEngine('Classic');
       setIsPrivateLobby(false);
-
-      fetchLobbies();
 
       const nuevaSala = data.lobby || data;
 
@@ -463,36 +625,35 @@ export default function MenuScreen() {
     const status = String(lobby?.status ?? '');
     const isHost = Boolean(currentUserId && hostId && hostId === currentUserId);
 
-    if (isHost && status !== 'waiting') {
-      await closeActiveGame(activeGameId);
+    if (isHost) {
+      await closeActiveGame(activeGameId, status === 'waiting' ? 'lobby' : 'game');
     } else {
       await dismissActiveGame(activeGameId);
     }
 
     setLobbies((previous) => previous.filter((item) => getLobbyCode(item) !== activeGameId));
     setActiveSessionLobbyDetails(null);
+    await refreshSession();
     await fetchLobbies();
   };
 
-  const fetchDecks = async () => {
+  const fetchDecks = useCallback(async (options?: FetchDecksOptions) => {
+    const includeCatalog = options?.includeCatalog ?? false;
+    const silent = options?.silent ?? false;
+
     try {
       const token = await AsyncStorage.getItem('userToken');
       if (!token) return [];
 
-      setIsLoadingDecks(true);
+      if (!silent) {
+        setIsLoadingDecks(true);
+      }
 
-      const [decksResponse, cardsResponse] = await Promise.all([
-        fetch(`${API_URL}/users/decks`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
-        fetch(`${API_URL}/users/cards`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
-      ]);
+      const decksResponse = await fetch(`${API_URL}/users/decks`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
 
       const decksData = await decksResponse.json();
-      const cardsData = await cardsResponse.json();
-      const collectionMap = await fetchCollectionMap(token);
       let normalizedDecks: UserDeck[] = [];
 
       if (decksResponse.ok) {
@@ -504,7 +665,7 @@ export default function MenuScreen() {
 
         normalizedDecks = rawDecks.map((deck: any) => ({
           id: normalizeDeckId(deck.id ?? deck.deckId ?? deck.id_deck),
-          name: String(deck.name ?? PRIMARY_DECK_NAME),
+          name: String(deck.name ?? DEFAULT_DECK_NAME),
           cardIds: Array.isArray(deck.cardIds)
             ? uniqueCardIds(deck.cardIds.map(normalizeCardId))
             : [],
@@ -512,13 +673,26 @@ export default function MenuScreen() {
         setDecks(normalizedDecks);
       }
 
-      if (cardsResponse.ok) {
-        const rawCards = Array.isArray(cardsData?.cards)
+      if (!includeCatalog) {
+        return normalizedDecks;
+      }
+
+      const cardsResponse = await fetch(`${API_URL}/users/cards`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const cardsData = await cardsResponse.json();
+      const rawCards = cardsResponse.ok
+        ? Array.isArray(cardsData?.cards)
           ? cardsData.cards
           : Array.isArray(cardsData)
             ? cardsData
-            : [];
+            : []
+        : [];
 
+      const collectionData = await fetchCollectionData(token);
+      const ownedCardsMap = new Map<string, OwnedCardOption>();
+
+      if (cardsResponse.ok) {
         const normalizedCards = rawCards.map((card: any) => {
           const cardId = normalizeCardId(card.cardId ?? card.id ?? card.id_card);
 
@@ -526,38 +700,98 @@ export default function MenuScreen() {
             cardId,
             name: String(card.name ?? card.title ?? 'Carta sin nombre'),
             quantity: 1,
-            url_image: typeof card.url_image === 'string' && card.url_image.trim().length > 0 ? card.url_image : null,
-            collectionName: resolveCardCollectionName(card, collectionMap.get(cardId)),
+            url_image: normalizeRemoteAssetUrl(card.url_image),
+            collectionName: resolveCardCollectionName(card, collectionData.collectionMap.get(cardId)),
+            isOwned: true,
           };
         }).filter((card: OwnedCardOption) => card.cardId);
 
-        setOwnedCards(dedupeCardsById(normalizedCards));
+        dedupeCardsById(normalizedCards).forEach((card) => {
+          ownedCardsMap.set(card.cardId, card);
+        });
       }
+
+      const mergedCatalog = dedupeCardsById(
+        collectionData.catalogCards.map((card) => ownedCardsMap.get(card.cardId) ?? card)
+      );
+
+      ownedCardsMap.forEach((card, cardId) => {
+        if (!mergedCatalog.some((catalogCard) => catalogCard.cardId === cardId)) {
+          mergedCatalog.push(card);
+        }
+      });
+
+      setOwnedCards(
+        mergedCatalog.sort((left, right) => {
+          const collectionComparison = left.collectionName.localeCompare(right.collectionName, 'es', {
+            sensitivity: 'base',
+          });
+          if (collectionComparison !== 0) return collectionComparison;
+
+          return left.name.localeCompare(right.name, 'es', { sensitivity: 'base' });
+        })
+      );
+      deckCatalogLoadedRef.current = true;
 
       return normalizedDecks;
     } catch (deckError) {
       console.log('Error cargando mazos:', deckError);
       return [];
     } finally {
-      setIsLoadingDecks(false);
+      if (!silent) {
+        setIsLoadingDecks(false);
+      }
+    }
+  }, [fetchCollectionData]);
+
+  const openDeckEditor = async (deck?: UserDeck | null) => {
+    const targetDeck = deck ?? null;
+    setEditingDeck(targetDeck);
+    setEditingDeckName(targetDeck?.name ?? DEFAULT_DECK_NAME);
+    setSelectedDeckCardIds(uniqueCardIds(targetDeck?.cardIds ?? []));
+    setSelectedCollectionName('Todas');
+    setDeckEditorVisible(true);
+    if (!deckCatalogLoadedRef.current) {
+      void fetchDecks({ includeCatalog: true });
     }
   };
 
-  const openPrimaryDeckEditor = async () => {
-    const loadedDecks = await fetchDecks();
-    const primaryDeck = loadedDecks[0] ?? decks[0] ?? null;
-    setEditingDeck(primaryDeck);
-    setSelectedDeckCardIds(uniqueCardIds(primaryDeck?.cardIds ?? []));
-    setSelectedCollectionName('Todas');
-    setDeckEditorVisible(true);
+  const openNewDeckEditor = async () => {
+    await openDeckEditor(null);
   };
 
-  const toggleDeckCard = (cardId: string) => {
+  const toggleDeckCard = useCallback((cardId: string) => {
+    const selectedCard = ownedCards.find((card) => card.cardId === cardId);
+    if (!selectedCard?.isOwned) return;
+
     setSelectedDeckCardIds(previous =>
       previous.includes(cardId)
         ? previous.filter(selectedCardId => selectedCardId !== cardId)
         : [...previous, cardId]
     );
+  }, [ownedCards]);
+
+  const deleteDeck = async (deck: UserDeck) => {
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      if (!token || !deck.id) return;
+
+      const response = await fetch(`${API_URL}/users/decks/${deck.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        Alert.alert('Error', data.message || 'No se pudo eliminar el mazo');
+        return;
+      }
+
+      await fetchDecks();
+    } catch (deleteError) {
+      console.log('Error eliminando mazo:', deleteError);
+      Alert.alert('Error', 'No se pudo eliminar el mazo');
+    }
   };
 
   const saveDeck = async () => {
@@ -566,6 +800,12 @@ export default function MenuScreen() {
       if (!token) return;
 
       const uniqueSelectedCardIds = uniqueCardIds(selectedDeckCardIds);
+      const normalizedDeckName = editingDeckName.trim();
+
+      if (!normalizedDeckName) {
+        Alert.alert('Error', 'Ponle un nombre al mazo.');
+        return;
+      }
 
       if (uniqueSelectedCardIds.length < DECK_MIN_CARDS) {
         Alert.alert('Error', `Selecciona al menos ${DECK_MIN_CARDS} cartas`);
@@ -584,7 +824,7 @@ export default function MenuScreen() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          name: PRIMARY_DECK_NAME,
+          name: normalizedDeckName,
           cardIds: uniqueSelectedCardIds,
         }),
       });
@@ -595,23 +835,11 @@ export default function MenuScreen() {
         return;
       }
 
-      const savedDeckId = normalizeDeckId(data?.deck?.id ?? data?.id ?? data?.deckId ?? editingDeck?.id);
-      const latestDecks = await fetchDecks();
-      const primaryDeckId = savedDeckId || latestDecks[0]?.id;
-      const extraDecks = latestDecks.filter(deck => deck.id && deck.id !== primaryDeckId);
-
-      if (primaryDeckId && extraDecks.length > 0) {
-        await Promise.all(extraDecks.map(deck =>
-          fetch(`${API_URL}/users/decks/${deck.id}`, {
-            method: 'DELETE',
-            headers: { Authorization: `Bearer ${token}` },
-          })
-        ));
-        await fetchDecks();
-      }
+      await fetchDecks();
 
       setDeckEditorVisible(false);
       setEditingDeck(null);
+      setEditingDeckName('');
       setSelectedDeckCardIds([]);
     } catch (saveError) {
       console.log('Error guardando mazo:', saveError);
@@ -626,6 +854,16 @@ export default function MenuScreen() {
     fetchDecks();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    const preloadDeckCatalog = () => {
+      if (deckCatalogLoadedRef.current) return;
+      void fetchDecks({ includeCatalog: true, silent: true });
+    };
+
+    const timeout = setTimeout(preloadDeckCatalog, 350);
+    return () => clearTimeout(timeout);
+  }, [fetchDecks]);
 
   useFocusEffect(
     useCallback(() => {
@@ -647,7 +885,7 @@ export default function MenuScreen() {
       const lobby = await fetchLobbyByCode(activeGameId);
       if (isCancelled) return;
 
-      if (!lobby || !isLobbyVisible(lobby)) {
+      if (!lobby || !isLobbyVisible(lobby) || !isUserInLobby(lobby, currentUserId)) {
         await dismissActiveGameRef.current(activeGameId);
         if (!isCancelled) {
           setActiveSessionLobbyDetails(null);
@@ -664,7 +902,7 @@ export default function MenuScreen() {
     return () => {
       isCancelled = true;
     };
-  }, [activeGameId, fetchLobbyByCode]);
+  }, [activeGameId, currentUserId, fetchLobbyByCode]);
 
   useEffect(() => {
     if (loaded || error) {
@@ -672,25 +910,58 @@ export default function MenuScreen() {
     }
   }, [loaded, error]);
 
-  if (!loaded && !error) return null;
+  const collectionNames = useMemo(
+    () => ['Todas', ...Array.from(new Set(ownedCards.map(card => card.collectionName)))],
+    [ownedCards]
+  );
+  const visibleDeckCards = useMemo(
+    () =>
+      selectedCollectionName === 'Todas'
+        ? ownedCards
+        : ownedCards.filter(card => card.collectionName === selectedCollectionName),
+    [ownedCards, selectedCollectionName]
+  );
+  const selectableDeckCards = useMemo(() => ownedCards.filter((card) => card.isOwned), [ownedCards]);
+  const selectedDeckCardIdsSet = useMemo(() => new Set(selectedDeckCardIds), [selectedDeckCardIds]);
+  const deckMaxCards = selectableDeckCards.length;
+  const activeSessionLobby = useMemo(
+    () =>
+      activeGameId
+        ? lobbies.find((lobby) => getLobbyCode(lobby) === activeGameId) ?? activeSessionLobbyDetails
+        : null,
+    [activeGameId, activeSessionLobbyDetails, lobbies]
+  );
+  const visibleLobbies = useMemo(() => {
+    const query = lobbySearchQuery.trim().toLowerCase();
+    if (!query) return lobbies;
 
-  const collectionNames = ['Todas', ...Array.from(new Set(ownedCards.map(card => card.collectionName)))];
-  const visibleDeckCards = selectedCollectionName === 'Todas'
-    ? ownedCards
-    : ownedCards.filter(card => card.collectionName === selectedCollectionName);
-  const deckMaxCards = ownedCards.length;
-  const activeSessionLobby = activeGameId
-    ? lobbies.find((lobby) => getLobbyCode(lobby) === activeGameId) ?? activeSessionLobbyDetails
-    : null;
+    return lobbies.filter((lobby) => {
+      const lobbyName = String(lobby.name ?? lobby.nombre ?? '').toLowerCase();
+      return lobbyName.includes(query);
+    });
+  }, [lobbies, lobbySearchQuery]);
   const isActiveSessionHost = Boolean(
     activeSessionLobby &&
       currentUserId &&
       String(activeSessionLobby.hostId ?? activeSessionLobby.host_id ?? '') === currentUserId
   );
   const canSaveDeck =
+    editingDeckName.trim().length > 0 &&
     selectedDeckCardIds.length >= DECK_MIN_CARDS &&
     selectedDeckCardIds.length <= Math.max(deckMaxCards, DECK_MIN_CARDS) &&
     !isSavingDeck;
+  const renderDeckCard = useCallback(
+    ({ item: card }: { item: OwnedCardOption }) => (
+      <DeckCardTile
+        card={card}
+        isSelected={selectedDeckCardIdsSet.has(card.cardId)}
+        onToggle={toggleDeckCard}
+      />
+    ),
+    [selectedDeckCardIdsSet, toggleDeckCard]
+  );
+
+  if (!loaded && !error) return null;
 
   return (
     <ImageBackground
@@ -750,7 +1021,11 @@ export default function MenuScreen() {
             )}
           </View>
 
-          <View style={styles.content}>
+          <ScrollView
+            style={styles.content}
+            contentContainerStyle={styles.contentContainer}
+            showsVerticalScrollIndicator={false}
+          >
           {activeGameId && activeSessionLobby ? (
             <View style={styles.activeSessionPanel}>
               <View style={styles.activeSessionTextGroup}>
@@ -791,9 +1066,39 @@ export default function MenuScreen() {
           <View style={styles.lobbiesHeader}>
             <View>
               <Text style={styles.lobbiesTitle}>Salas disponibles</Text>
-              <Text style={styles.lobbiesSubtitle}>{lobbies.length} resultados</Text>
+              <Text style={styles.lobbiesSubtitle}>{visibleLobbies.length} resultados</Text>
             </View>
+            <TouchableOpacity
+              style={[styles.lobbySearchButton, isLobbySearchVisible && styles.lobbySearchButtonActive]}
+              onPress={() => {
+                setIsLobbySearchVisible((previous) => {
+                  const nextValue = !previous;
+                  if (!nextValue) {
+                    setLobbySearchQuery('');
+                  }
+                  return nextValue;
+                });
+              }}
+              activeOpacity={0.85}
+            >
+              <Ionicons name={isLobbySearchVisible ? 'close-outline' : 'search-outline'} size={22} color="#FCEEB5" />
+            </TouchableOpacity>
           </View>
+
+          {isLobbySearchVisible ? (
+            <View style={styles.lobbySearchPanel}>
+              <Ionicons name="search-outline" size={18} color="#66727a" />
+              <TextInput
+                style={styles.lobbySearchInput}
+                value={lobbySearchQuery}
+                onChangeText={setLobbySearchQuery}
+                placeholder="Buscar sala por nombre"
+                placeholderTextColor="#66727a"
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
+          ) : null}
 
           <View style={styles.quickActionsRow}>
             <TouchableOpacity
@@ -807,7 +1112,11 @@ export default function MenuScreen() {
 
             <TouchableOpacity
               style={[styles.quickActionButton, createLobbyVisible && styles.quickActionButtonActive]}
-              onPress={() => setCreateLobbyVisible(!createLobbyVisible)}
+              onPress={() => {
+                setCreateLobbyVisible((previous) => {
+                  return !previous;
+                });
+              }}
               activeOpacity={0.85}
             >
               <Ionicons name={createLobbyVisible ? 'close-outline' : 'add-circle-outline'} size={20} color="#FCEEB5" />
@@ -816,12 +1125,87 @@ export default function MenuScreen() {
 
             <TouchableOpacity
               style={[styles.quickActionButton, deckEditorVisible && styles.quickActionButtonActive]}
-              onPress={() => void openPrimaryDeckEditor()}
+              onPress={() => void openNewDeckEditor()}
               activeOpacity={0.85}
             >
               <Ionicons name="albums-outline" size={19} color="#FCEEB5" />
-              <Text style={styles.quickActionText}>Mazo</Text>
+              <Text style={styles.quickActionText}>Mazos</Text>
             </TouchableOpacity>
+          </View>
+
+          <View style={styles.deckPanel}>
+            <View style={styles.deckPanelHeader}>
+              <View>
+                <Text style={styles.deckPanelTitle}>Mazos</Text>
+              </View>
+
+              <TouchableOpacity style={styles.newDeckButton} onPress={() => void openNewDeckEditor()}>
+                <Ionicons name="add-outline" size={16} color="#10212e" />
+                <Text style={styles.newDeckButtonText}>Nuevo</Text>
+              </TouchableOpacity>
+            </View>
+
+            {isLoadingDecks ? (
+              <ActivityIndicator color="#10212e" />
+            ) : decks.length === 0 ? (
+              <View style={styles.emptyDecksBox}>
+                <Ionicons name="albums-outline" size={26} color="#10212e" />
+                <Text style={styles.emptyDecksTitle}>Todavia no tienes mazos</Text>
+                <Text style={styles.emptyDecksText}>
+                  Crea tu primer mazo para empezar a preparar partidas.
+                </Text>
+              </View>
+            ) : (
+              decks.map((deck) => {
+                const isEditingDeck = deckEditorVisible && editingDeck?.id === deck.id;
+
+                return (
+                  <View
+                    key={deck.id || deck.name}
+                    style={[styles.deckRow, isEditingDeck && styles.deckRowSelected]}
+                  >
+                    <TouchableOpacity
+                      style={styles.deckMainAction}
+                      activeOpacity={0.85}
+                      onPress={() => void openDeckEditor(deck)}
+                    >
+                      <View style={styles.deckTextGroup}>
+                        <Text style={styles.deckName}>{deck.name || DEFAULT_DECK_NAME}</Text>
+                        <Text style={styles.deckMeta}>{deck.cardIds.length} cartas</Text>
+                      </View>
+                    </TouchableOpacity>
+
+                    <View style={styles.deckRowActions}>
+                      <TouchableOpacity
+                        style={styles.deckIconButton}
+                        onPress={() => void openDeckEditor(deck)}
+                      >
+                        <Ionicons name="create-outline" size={18} color="#FCEEB5" />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.deckIconButton}
+                        onPress={() =>
+                          Alert.alert(
+                            'Eliminar mazo',
+                            `Se eliminara "${deck.name}".`,
+                            [
+                              { text: 'Cancelar', style: 'cancel' },
+                              {
+                                text: 'Eliminar',
+                                style: 'destructive',
+                                onPress: () => void deleteDeck(deck),
+                              },
+                            ],
+                          )
+                        }
+                      >
+                        <Ionicons name="trash-outline" size={18} color="#e74c3c" />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                );
+              })
+            )}
           </View>
 
           {createLobbyVisible && (
@@ -839,13 +1223,27 @@ export default function MenuScreen() {
 
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Jugadores</Text>
-                <TextInput
-                  style={styles.lobbyInput}
-                  value={lobbyPlayers}
-                  onChangeText={setLobbyPlayers}
-                  placeholder="4"
-                  placeholderTextColor="#6b6b6b"
-                />
+                <View style={styles.playerOptionsRow}>
+                  {LOBBY_PLAYER_OPTIONS.map((option) => (
+                    <TouchableOpacity
+                      key={option}
+                      style={[
+                        styles.playerOption,
+                        lobbyPlayers === option && styles.playerOptionActive,
+                      ]}
+                      onPress={() => setLobbyPlayers(option)}
+                    >
+                      <Text
+                        style={[
+                          styles.playerOptionText,
+                          lobbyPlayers === option && styles.playerOptionTextActive,
+                        ]}
+                      >
+                        {option}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
               </View>
 
               <Text style={styles.inputLabel}>Modo</Text>
@@ -886,19 +1284,18 @@ export default function MenuScreen() {
             </View>
           )}
 
-          <ScrollView
-            contentContainerStyle={styles.lobbiesList}
-            showsVerticalScrollIndicator={false}
-          >
+          <View style={styles.lobbiesList}>
             {isLoadingLobbies ? (
               <ActivityIndicator color="#0f2027" />
-            ) : lobbies.length === 0 ? (
-              <Text style={styles.emptyLobbiesText}>No hay salas disponibles</Text>
+            ) : visibleLobbies.length === 0 ? (
+              <Text style={styles.emptyLobbiesText}>
+                {lobbySearchQuery.trim() ? 'No hay salas con ese nombre' : 'No hay salas disponibles'}
+              </Text>
             ) : (
-              lobbies.map((lobby, index) => {
+              visibleLobbies.map((lobby, index) => {
                 const modeName = normalizeLobbyMode(lobby.engine ?? lobby.modo);
                 const isStellaLobby = modeName === 'Stella';
-                const visiblePlayers = Array.isArray(lobby.players) ? lobby.players.map(String) : [];
+                const visiblePlayers = getLobbyPlayerIds(lobby);
                 const shouldAutoJoin = !!currentUserId && visiblePlayers.includes(currentUserId);
 
                 return (
@@ -914,25 +1311,20 @@ export default function MenuScreen() {
                       return;
                     }
 
-                    return activeGameId
-                      ? router.push({
-                          pathname: '/gameScreen',
-                          params: { gameId: activeGameId },
-                        })
-                      : router.push({
-                          pathname: '/main',
-                          params: {
-                            lobbyId: String(lobby.id ?? ''),
-                            lobbyCode,
-                            lobbyName: String(lobby.name ?? lobby.nombre ?? ''),
-                            engine: String(lobby.engine ?? lobby.modo ?? 'STANDARD'),
-                            maxPlayers: String(lobby.maxPlayers ?? 4),
-                            currentPlayers: String(lobby.players?.length ?? lobby.currentPlayers ?? 0),
-                            isPrivate: String(Boolean(lobby.isPrivate)),
-                            status: String(lobby.status ?? 'waiting'),
-                            autoJoin: shouldAutoJoin ? '1' : '0',
-                          }
-                        })
+                    return router.push({
+                      pathname: '/main',
+                      params: {
+                        lobbyId: String(lobby.id ?? ''),
+                        lobbyCode,
+                        lobbyName: String(lobby.name ?? lobby.nombre ?? ''),
+                        engine: String(lobby.engine ?? lobby.modo ?? 'STANDARD'),
+                        maxPlayers: String(lobby.maxPlayers ?? 4),
+                        currentPlayers: String(lobby.players?.length ?? lobby.currentPlayers ?? 0),
+                        isPrivate: String(Boolean(lobby.isPrivate)),
+                        status: String(lobby.status ?? 'waiting'),
+                        autoJoin: shouldAutoJoin ? '1' : '0',
+                      }
+                    })
                   }}
                 >
                   <View style={[styles.lobbyModeBanner, isStellaLobby ? styles.lobbyModeBannerStella : styles.lobbyModeBannerClassic]}>
@@ -974,7 +1366,7 @@ export default function MenuScreen() {
                 );
               })
             )}
-          </ScrollView>
+          </View>
 
           <TouchableOpacity
             style={[styles.refreshLobbiesButton, isLoadingLobbies && styles.refreshLobbiesButtonDisabled]}
@@ -987,7 +1379,7 @@ export default function MenuScreen() {
               {isLoadingLobbies ? 'Actualizando...' : 'Refrescar salas'}
             </Text>
           </TouchableOpacity>
-          </View>
+          </ScrollView>
 
           <Modal
             visible={deckEditorVisible}
@@ -996,16 +1388,43 @@ export default function MenuScreen() {
             statusBarTranslucent
             navigationBarTranslucent
             presentationStyle="overFullScreen"
-            onRequestClose={() => setDeckEditorVisible(false)}
+            onRequestClose={() => {
+              setDeckEditorVisible(false);
+              setEditingDeck(null);
+              setEditingDeckName('');
+              setSelectedDeckCardIds([]);
+            }}
           >
             <View style={styles.deckModalOverlay}>
               <View style={styles.deckModalBox}>
                 <View style={styles.deckModalHeader}>
-                  <Text style={styles.deckModalTitle}>Mazo principal</Text>
-                  <TouchableOpacity onPress={() => setDeckEditorVisible(false)}>
+                  <Text style={styles.deckModalTitle}>
+                    {editingDeck ? 'Editar mazo' : 'Crear mazo'}
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => {
+                      setDeckEditorVisible(false);
+                      setEditingDeck(null);
+                      setEditingDeckName('');
+                      setSelectedDeckCardIds([]);
+                    }}
+                  >
                     <Ionicons name="close-outline" size={26} color="#FCEEB5" />
                   </TouchableOpacity>
                 </View>
+
+                <TextInput
+                  style={styles.deckNameInput}
+                  value={editingDeckName}
+                  onChangeText={setEditingDeckName}
+                  placeholder="Nombre del mazo"
+                  placeholderTextColor="#6b6b6b"
+                  maxLength={40}
+                />
+
+                <Text style={styles.deckModalHelperText}>
+                  Ponle un nombre al mazo y elige entre las cartas que tienes. Las bloqueadas se muestran con candado.
+                </Text>
 
                 <ScrollView
                   horizontal
@@ -1034,43 +1453,28 @@ export default function MenuScreen() {
                   {selectedDeckCardIds.length}/{deckMaxCards || 0} cartas seleccionadas
                 </Text>
 
-                <ScrollView contentContainerStyle={styles.deckCardsGrid} showsVerticalScrollIndicator={false}>
-                  {isLoadingDecks ? (
-                    <View style={styles.deckLoadingBox}>
-                      <ActivityIndicator color="#FCEEB5" />
-                    </View>
-                  ) : ownedCards.length === 0 ? (
-                    <Text style={styles.emptyDeckCardsText}>No tienes cartas disponibles</Text>
-                  ) : visibleDeckCards.length === 0 ? (
-                    <Text style={styles.emptyDeckCardsText}>No hay cartas en esta coleccion</Text>
-                  ) : (
-                    visibleDeckCards.map((card, index) => {
-                      const isSelectedCard = selectedDeckCardIds.includes(card.cardId);
-
-                      return (
-                        <TouchableOpacity
-                          key={`${card.cardId}-${index}`}
-                          style={[styles.deckCardOption, isSelectedCard && styles.deckCardOptionSelected]}
-                          onPress={() => toggleDeckCard(card.cardId)}
-                          activeOpacity={0.85}
-                        >
-                          {card.url_image ? (
-                            <Image source={{ uri: card.url_image }} style={styles.deckCardImage} />
-                          ) : (
-                            <View style={styles.deckCardPlaceholder}>
-                              <Text style={styles.deckCardPlaceholderText}>{card.cardId.replace('c_', '')}</Text>
-                            </View>
-                          )}
-                          {isSelectedCard && (
-                            <View style={styles.deckCardCheck}>
-                              <Ionicons name="checkmark" size={14} color="#10212e" />
-                            </View>
-                          )}
-                        </TouchableOpacity>
-                      );
-                    })
-                  )}
-                </ScrollView>
+                {isLoadingDecks ? (
+                  <View style={styles.deckLoadingBox}>
+                    <ActivityIndicator color="#FCEEB5" />
+                  </View>
+                ) : ownedCards.length === 0 ? (
+                  <Text style={styles.emptyDeckCardsText}>No hay cartas disponibles.</Text>
+                ) : visibleDeckCards.length === 0 ? (
+                  <Text style={styles.emptyDeckCardsText}>No hay cartas en esta coleccion</Text>
+                ) : (
+                  <FlatList
+                    data={visibleDeckCards}
+                    keyExtractor={(item) => item.cardId}
+                    numColumns={3}
+                    initialNumToRender={18}
+                    windowSize={7}
+                    removeClippedSubviews
+                    contentContainerStyle={styles.deckCardsGrid}
+                    showsVerticalScrollIndicator={false}
+                    columnWrapperStyle={styles.deckCardsRow}
+                    renderItem={renderDeckCard}
+                  />
+                )}
 
                 <TouchableOpacity
                   style={[
@@ -1163,9 +1567,13 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   content: {
-  flex: 1,
-  padding: 20,
-},
+    flex: 1,
+  },
+
+  contentContainer: {
+    padding: 20,
+    paddingBottom: 32,
+  },
 
 activeSessionPanel: {
   backgroundColor: 'rgba(10, 25, 40, 0.96)',
@@ -1227,13 +1635,50 @@ closeGameButtonText: {
 lobbiesHeader: {
   flexDirection: 'row',
   justifyContent: 'space-between',
-  alignItems: 'flex-start',
+  alignItems: 'center',
   marginBottom: 18,
 },
 
 headerActions: {
   gap: 10,
   alignItems: 'flex-end',
+},
+
+lobbySearchButton: {
+  width: 44,
+  height: 44,
+  borderRadius: 14,
+  backgroundColor: 'rgba(10, 25, 40, 0.95)',
+  borderWidth: 1,
+  borderColor: 'rgba(252, 238, 181, 0.26)',
+  alignItems: 'center',
+  justifyContent: 'center',
+},
+
+lobbySearchButtonActive: {
+  backgroundColor: 'rgba(26, 53, 70, 0.98)',
+  borderColor: '#FCEEB5',
+},
+
+lobbySearchPanel: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 8,
+  backgroundColor: 'rgba(238, 242, 245, 0.96)',
+  borderRadius: 14,
+  borderWidth: 1,
+  borderColor: 'rgba(16, 33, 46, 0.12)',
+  paddingHorizontal: 12,
+  paddingVertical: 10,
+  marginTop: -8,
+  marginBottom: 14,
+},
+
+lobbySearchInput: {
+  flex: 1,
+  color: '#10212e',
+  fontSize: 15,
+  paddingVertical: 2,
 },
 
 lobbiesTitle: {
@@ -1306,6 +1751,18 @@ deckPanelSubtitle: {
   marginTop: 2,
 },
 
+emptyDecksBox: {
+  borderRadius: 16,
+  backgroundColor: 'rgba(168, 200, 192, 0.3)',
+  borderWidth: 1,
+  borderColor: 'rgba(16, 33, 46, 0.12)',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 8,
+  paddingVertical: 18,
+  paddingHorizontal: 14,
+},
+
 newDeckButton: {
   flexDirection: 'row',
   alignItems: 'center',
@@ -1324,9 +1781,15 @@ newDeckButtonText: {
 },
 
 emptyDecksText: {
-  color: '#2c3e50',
+  color: '#46545f',
   textAlign: 'center',
-  paddingVertical: 10,
+  lineHeight: 20,
+},
+
+emptyDecksTitle: {
+  color: '#10212e',
+  fontWeight: 'bold',
+  fontSize: 16,
 },
 
 deckRow: {
@@ -1438,6 +1901,12 @@ deckCardCountText: {
   fontSize: 13,
 },
 
+deckModalHelperText: {
+  color: '#d7dce2',
+  fontSize: 12,
+  lineHeight: 18,
+},
+
 collectionTabs: {
   gap: 8,
   paddingRight: 8,
@@ -1477,10 +1946,12 @@ collectionTabTextActive: {
 },
 
 deckCardsGrid: {
-  flexDirection: 'row',
-  flexWrap: 'wrap',
-  gap: 10,
   paddingBottom: 8,
+},
+
+deckCardsRow: {
+  justifyContent: 'space-between',
+  marginBottom: 10,
 },
 
 emptyDeckCardsText: {
@@ -1513,6 +1984,10 @@ deckCardOptionSelected: {
   backgroundColor: 'rgba(252, 238, 181, 0.12)',
 },
 
+deckCardOptionLocked: {
+  opacity: 0.9,
+},
+
 deckCardImage: {
   width: '100%',
   aspectRatio: 0.72,
@@ -1541,6 +2016,14 @@ deckCardName: {
   fontWeight: '600',
   marginTop: 6,
   minHeight: 28,
+},
+
+deckCardLockOverlay: {
+  ...StyleSheet.absoluteFillObject,
+  backgroundColor: 'rgba(5, 12, 18, 0.58)',
+  borderRadius: 12,
+  alignItems: 'center',
+  justifyContent: 'center',
 },
 
 deckCardCheck: {
@@ -1635,6 +2118,36 @@ lobbyInput: {
   fontSize: 15,
 },
 
+playerOptionsRow: {
+  flexDirection: 'row',
+  gap: 8,
+},
+
+playerOption: {
+  flex: 1,
+  borderRadius: 10,
+  paddingVertical: 12,
+  alignItems: 'center',
+  backgroundColor: '#ffffff',
+  borderWidth: 1,
+  borderColor: '#d4d4d4',
+},
+
+playerOptionActive: {
+  backgroundColor: '#FCEEB5',
+  borderColor: '#d4c494',
+},
+
+playerOptionText: {
+  color: '#2c3e50',
+  fontWeight: 'bold',
+  fontSize: 15,
+},
+
+playerOptionTextActive: {
+  color: '#10212e',
+},
+
 privateRow: {
   flexDirection: 'row',
   alignItems: 'center',
@@ -1692,12 +2205,13 @@ engineOptionTextActive: {
 },
 
 createAndJoinButton: {
-  alignSelf: 'flex-end',
+  width: '100%',
   backgroundColor: '#d4a63a',
   paddingHorizontal: 18,
-  paddingVertical: 10,
+  paddingVertical: 12,
   borderRadius: 18,
   marginTop: 4,
+  alignItems: 'center',
 },
 
 createAndJoinText: {

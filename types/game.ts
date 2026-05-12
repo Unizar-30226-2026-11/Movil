@@ -11,6 +11,7 @@ export type GenericGameState = {
   timer?: number;
   players?: string[];
   disconnectedPlayers?: string[];
+  playerNames?: Record<string, string>;
   winners?: string[];
   scores?: Record<string, number>;
   cardUrls?: Record<string, string>;
@@ -20,15 +21,15 @@ export type GenericGameState = {
     storytellerCardId?: number | null;
     playedCards?: Record<string, number>;
     boardCards?: number[];
-    boardCardsDetailed?: Array<{
+    boardCardsDetailed?: {
       id?: string | number;
       id_card?: string | number;
       cardId?: string | number;
       url_image?: string | null;
       [key: string]: unknown;
-    }>;
+    }[];
     selectedVoteCardId?: number | null;
-    votes?: Array<{ voterId: string; targetCardId: number }>;
+    votes?: { voterId: string; targetCardId: number }[];
     [key: string]: unknown;
   };
   isStarActive?: boolean;
@@ -47,12 +48,12 @@ export type GenericGameState = {
     id?: string;
     name?: string;
     url_image?: string;
-    tiles?: Array<{
+    tiles?: {
       index?: number;
       type?: string;
       value?: number;
       [key: string]: unknown;
-    }>;
+    }[];
     [key: string]: unknown;
   };
   [key: string]: unknown;

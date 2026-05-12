@@ -9,7 +9,11 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.rayanunizar.dixitmovil",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -19,7 +23,8 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.rayanunizar.dixitmovil"
     },
     "web": {
       "output": "static",
@@ -39,15 +44,20 @@
           }
         }
       ],
-      "expo-font"
+      "expo-font",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
     },
     "extra": {
-      "EXPO_PUBLIC_API_URL": "http://10.63.201.253:3000/api",
-      "EXPO_PUBLIC_SOCKET_URL": "http://10.63.201.253:3000"
+      "EXPO_PUBLIC_API_URL": "https://api.keystudios.app/api",
+      "EXPO_PUBLIC_SOCKET_URL": "https://api.keystudios.app",
+      "router": {},
+      "eas": {
+        "projectId": "4310c8fd-60f7-4cee-8adf-aa7db1c8200a"
+      }
     }
   }
 }

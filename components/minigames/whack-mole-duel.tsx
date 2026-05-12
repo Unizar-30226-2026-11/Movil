@@ -71,6 +71,7 @@ export function WhackMoleDuel({ duration, onComplete }: WhackMoleDuelProps) {
         if (prev <= 1) {
           clearInterval(timerInterval);
           clearInterval(moleInterval);
+          setActiveMole(null);
           return 0;
         }
 
@@ -107,6 +108,7 @@ export function WhackMoleDuel({ duration, onComplete }: WhackMoleDuelProps) {
                 key={cell}
                 style={[styles.cell, isGolden && styles.goldenCell]}
                 onPress={() => {
+                  if (finishedRef.current || remaining === 0) return;
                   if (!isActive) return;
 
                   const points = activeMole.kind === 'golden' ? GOLDEN_MOLE_POINTS : NORMAL_MOLE_POINTS;
@@ -165,7 +167,6 @@ const styles = StyleSheet.create({
     borderRadius: 24,
   },
   gardenOverlay: {
-    position: 'absolute',
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(15, 24, 14, 0.34)',
   },

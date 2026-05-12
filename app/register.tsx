@@ -17,6 +17,7 @@ export default function RegisterScreen() {
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
   const [loaded, error] = useFonts({
@@ -32,8 +33,13 @@ export default function RegisterScreen() {
   if (!loaded && !error) return null;
 
   const handleRegister = async () => {
-    if (!email || !username || !password) {
+    if (!email || !username || !password || !confirmPassword) {
       Alert.alert("Error", "Rellena todos los campos.");
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      Alert.alert("Error", "Las contraseñas no coinciden.");
       return;
     }
 
@@ -101,6 +107,14 @@ export default function RegisterScreen() {
                 secureTextEntry={true}
                 value={password}
                 onChangeText={setPassword}
+              />
+              <TextInput
+                style={styles.input}
+                placeholder="Repetir contraseña"
+                placeholderTextColor="#6b6b6b"
+                secureTextEntry={true}
+                value={confirmPassword}
+                onChangeText={setConfirmPassword}
               />
 
               <TouchableOpacity style={styles.registerButton} onPress={handleRegister} disabled={loading}>
