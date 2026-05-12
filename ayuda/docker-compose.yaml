@@ -1,0 +1,99 @@
+services:
+  # --- POSTGRES LOCAL ---
+  db:
+    image: postgres:17.6
+    container_name: postgres_db
+    restart: always
+    # ports:
+    #   - "5432:5432"
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER_READ_WRITE:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER_READ_WRITE:-postgres} -d ${POSTGRES_DB:-postgres} -h localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # --- MIGRACIONES (one-shot) ---
+  migrate:
+    image: ghcr.io/unizar-30226-2026-11/backend-tools:latest
+    restart: "no"
+    env_file:
+      - .env
+    command: ["npx", "prisma", "migrate", "deploy"]
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+
+  # --- BACKEND ---
+  backend:
+    image: ghcr.io/unizar-30226-2026-11/backend:latest
+    container_name: backend_app
+    restart: always
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      SKIP_MIGRATIONS: "true"
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  # --- SYNC DE DATOS (one-shot, manual) ---
+  sync:
+    image: ghcr.io/unizar-30226-2026-11/backend-tools:latest
+    restart: "no"
+    profiles: ["manual"]
+    env_file:
+      - .env
+    command: ["npm", "run", "sync:prod", "--", "--no-interactive", "${SYNC_VOLUME_TARGET:-/app/sync-data}"]
+    volumes:
+      - ${SYNC_VOLUME_SOURCE:-sync_data}:${SYNC_VOLUME_TARGET:-/app/sync-data}
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+
+  # --- FRONTEND ---
+  frontend:
+    image: ghcr.io/unizar-30226-2026-11/frontend:latest
+    container_name: frontend_app
+    restart: always
+    ports:
+      - "80:80"
+    env_file:
+      - .env
+
+  # --- REDIS ---
+  redis:
+    image: redis/redis-stack-server:latest
+    container_name: redis_server
+    restart: always
+    # ports:
+    #   - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  db_data:
+  redis_data:
+  sync_data:
